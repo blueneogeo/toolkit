@@ -83,7 +83,7 @@ _dispatch "$@"
 
 ## Commands
 
-`setup [--force]` · `configure` · `build` · `clean` · `install [iphone]` · `uninstall [iphone]` · `watch [iphone] [mode]` ·
+`setup [--force]` · `pull` · `configure` · `build` · `clean` · `install [iphone]` · `uninstall [iphone]` · `watch [iphone] [mode]` ·
 `test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
 `logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level]` · `e2e` · `e2e-run` ·
 `upload [--force] <text>` · `sentry <cmd>`
