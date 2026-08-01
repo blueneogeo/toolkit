@@ -1094,7 +1094,13 @@ do_update_toolkit() {
     local before after
     before=$(git -C "$tool_dir" rev-parse --short HEAD 2>/dev/null || echo "none")
     echo "→ Syncing toolkit ($mount) ..."
-    GIT_ALLOW_PROTOCOL=file git -C "$root" submodule update --remote "$mount" 2>&1 | tail -2
+    local url
+    url=$(git -C "$root" config -f .gitmodules --get "submodule.$mount.url" 2>/dev/null || echo "")
+    if [[ "$url" == /* ]]; then
+        GIT_ALLOW_PROTOCOL=file git -C "$root" submodule update --remote "$mount" 2>&1 | tail -2
+    else
+        git -C "$root" submodule update --remote "$mount" 2>&1 | tail -2
+    fi
     after=$(git -C "$tool_dir" rev-parse --short HEAD 2>/dev/null || echo "none")
     if [[ "$before" != "$after" ]]; then
         echo "✓ toolkit synced: $before → $after"
