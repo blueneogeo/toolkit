@@ -42,7 +42,7 @@ platform_dir() {
 # ── Mounting ────────────────────────────────────────────────────────
 
 mount_toolkit() {
-    if [[ -d "$PROJECT_DIR/$MOUNT/.git" && -f "$PROJECT_DIR/$MOUNT/ios/build.sh" ]]; then
+    if [[ -e "$PROJECT_DIR/$MOUNT/.git" && -f "$PROJECT_DIR/$MOUNT/ios/build.sh" ]]; then
         ok "toolkit already mounted at $MOUNT/"
         return 0
     fi
