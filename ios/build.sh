@@ -1075,7 +1075,7 @@ do_doctor() {
 
 # ── Toolkit sync ─────────────────────────────────────────────────────
 
-do_pull() {
+do_update_toolkit() {
     _detect_project_config
     local root="$PROJECT_ROOT" mount=""
     for _ in 1 2 3 4 5; do
@@ -1501,7 +1501,7 @@ Usage: ./build.sh [device] [--device <name|udid>] <command> [<args>]
 
   Local dev:
     setup              First-time setup: config + generate + build + LSP config (sim only)
-    pull               Sync the toolkit submodule to the latest version
+    update-toolkit     Update the toolkit submodule to the latest version
     configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
     build              Lint → format → incremental build
     clean              Clean build artifacts
@@ -1587,7 +1587,7 @@ _dispatch() {
                 e2e)       do_e2e false ;;
                 e2e-run)   do_e2e true ;;
                 sentry)    shift; _dispatch_sentry "$@" ;;
-                pull)      do_pull ;;
+                update-toolkit) do_update_toolkit ;;
                 configure) do_configure ;;
                 doctor)    do_doctor ;;
                 lint)      do_lint ;;
@@ -1611,7 +1611,7 @@ _dispatch() {
         e2e-run)  do_e2e true ;;
         sentry)   shift; _dispatch_sentry "$@" ;;
         upload)   shift; do_upload "$@" ;;
-        pull)     do_pull ;;
+        update-toolkit) do_update_toolkit ;;
         configure) do_configure ;;
         doctor)   do_doctor ;;
         lint)     do_lint ;;
