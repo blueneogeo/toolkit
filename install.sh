@@ -58,7 +58,10 @@ mount_toolkit() {
         ok "toolkit copied to $MOUNT/"
         return 0
     fi
-    git -C "$PROJECT_DIR" submodule add "$TOOLKIT_DIR" "$MOUNT" >/dev/null 2>&1
+    if [[ "$TOOLKIT_DIR" == /* && -d "$TOOLKIT_DIR/.git" ]]; then
+        git -C "$PROJECT_DIR" config protocol.file.allow always
+    fi
+    GIT_ALLOW_PROTOCOL=file git -C "$PROJECT_DIR" submodule add "$TOOLKIT_DIR" "$MOUNT" >/dev/null 2>&1
     ok "toolkit mounted as submodule at $MOUNT/"
 }
 
@@ -190,7 +193,7 @@ main() {
 
     echo "Detected platforms: ${platforms[*]}"
     if [[ -t 0 ]]; then
-        read -rp "Proceed with these platforms? [Y/n]: " confirm
+        read -rp "Proceed with these platforms? [Y/n]: " confirm || true
         if [[ "$confirm" == "n" || "$confirm" == "N" ]]; then
             echo "Aborted."
             exit 1
