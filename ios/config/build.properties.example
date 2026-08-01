@@ -1,0 +1,52 @@
+# build.properties — project configuration for ios-toolkit
+# Generated from ios-toolkit/config/build.properties.example by `./build.sh setup`.
+# Everything is auto-detected from project.yml unless overridden below.
+
+# ── Core (auto-detected from project.yml unless overridden) ──────────
+# IOS_PROJECT_NAME=MyApp          # project name (from project.yml `name:`)
+# IOS_SCHEME_NAME=MyApp           # scheme (first entry under `schemes:`)
+# IOS_APP_NAME=MyApp              # app executable name
+# IOS_SOURCE_DIR=MyApp            # app source directory (lint/format/watch target)
+# IOS_BUNDLE_ID=com.example.myapp # bundle identifier
+# IOS_TEST_TARGET=MyAppTests      # unit test target (for `test <filter>`)
+
+# ── iOS ──────────────────────────────────────────────────────────────
+# IOS_TEAM_ID=XXXXXXXXXX          # development team ID (required for device installs/signing)
+
+# ── Online features (all OFF by default — the project builds without them) ──
+# Set these to "true" and run `./build.sh setup` to configure each.
+# TOOLKIT_SERVER_ENABLED=false    # export API_BASE_URL + require server health before tests
+# TOOLKIT_E2E_ENABLED=false       # `e2e` / `e2e-run` UI test runner
+# TOOLKIT_UPLOAD_ENABLED=false    # `upload` TestFlight deploy (needs AuthKey.p8 + key id + fastlane)
+# TOOLKIT_SENTRY_ENABLED=false    # `sentry` queries (needs SENTRY_ORG + IOS_SENTRY_PROJECT)
+
+# ── Local features (safe defaults) ──────────────────────────────────
+# TOOLKIT_LOGS_ENABLED=true       # `logs` / `debug` os_log streaming
+# TOOLKIT_DEBUG_SCRIPTS=false     # allow `debug --script` injection (needs host-app ScriptRunner)
+# TOOLKIT_ARCH_CHECKS=true        # AppState architecture lint gates (state/mark/handler/try checks)
+
+# ── Architecture check config (used when TOOLKIT_ARCH_CHECKS=true) ──
+# TOOLKIT_STATE_CLASS=AppState          # central @Observable state class name
+# TOOLKIT_STATE_FILE=model/AppState.swift  # path to the state class file (relative to SOURCE_DIR)
+# TOOLKIT_STATE_EXCLUSION=              # @State lines allowed in the app (default: "@State private var appState = AppState()")
+
+# ── Sentry ───────────────────────────────────────────────────────────
+# SENTRY_ORG=your-org
+# IOS_SENTRY_PROJECT=your-project
+
+# ── Deploy (upload) ──────────────────────────────────────────────────
+# IOS_KEY_ID=
+# IOS_ISSUER_ID=
+# DEPLOY_TAG_PREFIX=ios/v
+# FASTLANE_LANE=ios upload
+
+# ── E2E ──────────────────────────────────────────────────────────────
+# E2E_SCHEME=MyAppE2E
+# SERVER_START_CMD=
+# SERVER_STOP_CMD=
+# E2E_BASE_URL=http://localhost:8080
+
+# ── Misc ─────────────────────────────────────────────────────────────
+# DEV_BUNDLE_SUFFIX=              # e.g. .dev to use a debug bundle id for sim/device builds
+# SWIFTLINT_CONFIG=               # explicit path to .swiftlint.yml (default: searched upward)
+# PERIPHERY_CONFIG=               # explicit path to .periphery.yml (default: searched upward)
