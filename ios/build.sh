@@ -237,7 +237,7 @@ _set_mode_sim() {
         export API_BASE_URL
         API_BASE_URL="${API_BASE_URL:-http://localhost:8080}"
     fi
-    BUNDLE_ID="${IOS_BUNDLE_ID}${DEV_BUNDLE_SUFFIX}"
+    BUNDLE_ID="${BUNDLE_ID}${DEV_BUNDLE_SUFFIX}"
 }
 
 _set_mode_device() {
@@ -251,7 +251,7 @@ _set_mode_device() {
         host_ip=$(ipconfig getifaddr en0 2>/dev/null || echo "")
         API_BASE_URL="http://${host_ip:-localhost}:8080"
     fi
-    BUNDLE_ID="${IOS_BUNDLE_ID}${DEV_BUNDLE_SUFFIX}"
+    BUNDLE_ID="${BUNDLE_ID}${DEV_BUNDLE_SUFFIX}"
 }
 
 _set_mode_device_forced() {
@@ -1073,6 +1073,37 @@ do_doctor() {
     return "$failed"
 }
 
+# ── Toolkit sync ─────────────────────────────────────────────────────
+
+do_pull() {
+    _detect_project_config
+    local root="$PROJECT_ROOT" mount=""
+    for _ in 1 2 3 4 5; do
+        if [[ -f "$root/.gitmodules" ]]; then
+            mount=$(git -C "$root" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null | head -1 | awk '{print $2}')
+            break
+        fi
+        root="$(dirname "$root")"
+    done
+    mount="${mount:-toolkit}"
+    local tool_dir="$root/$mount"
+    if [[ ! -e "$tool_dir/.git" ]]; then
+        echo "✗ No toolkit mount found at $tool_dir (not a git submodule?)."
+        return 1
+    fi
+    local before after
+    before=$(git -C "$tool_dir" rev-parse --short HEAD 2>/dev/null || echo "none")
+    echo "→ Syncing toolkit ($mount) ..."
+    GIT_ALLOW_PROTOCOL=file git -C "$root" submodule update --remote "$mount" 2>&1 | tail -2
+    after=$(git -C "$tool_dir" rev-parse --short HEAD 2>/dev/null || echo "none")
+    if [[ "$before" != "$after" ]]; then
+        echo "✓ toolkit synced: $before → $after"
+        echo "  The new submodule commit is staged in the superproject; commit it when ready."
+    else
+        echo "✓ toolkit already up to date ($before)"
+    fi
+}
+
 # ── External services configuration ─────────────────────────────────
 
 _config_set() {
@@ -1470,6 +1501,7 @@ Usage: ./build.sh [device] [--device <name|udid>] <command> [<args>]
 
   Local dev:
     setup              First-time setup: config + generate + build + LSP config (sim only)
+    pull               Sync the toolkit submodule to the latest version
     configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
     build              Lint → format → incremental build
     clean              Clean build artifacts
@@ -1555,6 +1587,7 @@ _dispatch() {
                 e2e)       do_e2e false ;;
                 e2e-run)   do_e2e true ;;
                 sentry)    shift; _dispatch_sentry "$@" ;;
+                pull)      do_pull ;;
                 configure) do_configure ;;
                 doctor)    do_doctor ;;
                 lint)      do_lint ;;
@@ -1578,6 +1611,7 @@ _dispatch() {
         e2e-run)  do_e2e true ;;
         sentry)   shift; _dispatch_sentry "$@" ;;
         upload)   shift; do_upload "$@" ;;
+        pull)     do_pull ;;
         configure) do_configure ;;
         doctor)   do_doctor ;;
         lint)     do_lint ;;
