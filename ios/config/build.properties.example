@@ -28,6 +28,14 @@
 # ── Architecture check config (used when TOOLKIT_ARCH_CHECKS=true) ──
 # TOOLKIT_STATE_CLASS=AppState          # central @Observable state class name
 # TOOLKIT_STATE_FILE=model/AppState.swift  # path to the state class file (relative to SOURCE_DIR)
+# TOOLKIT_CONCURRENCY_CHECKS=true       # enforce concurrency safety gates (nonisolated(unsafe), locks, etc.)
+
+# ── Concurrency safety model ─────────────────────────────────────────
+# All mutable state: @MainActor @Observable class
+# File I/O & hardware: dedicated actors with custom serial executors
+# Cross-actor data: Sendable structs only
+# Escape hatches: // concurrent-safe: <reason> required for nonisolated(unsafe),
+#   @unchecked Sendable, DispatchQueue.global, locks, semaphores, synchronous I/O
 
 # ── Sentry ───────────────────────────────────────────────────────────
 # SENTRY_ORG=your-org

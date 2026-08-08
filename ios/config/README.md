@@ -61,7 +61,8 @@ scheme, app name, source dir, bundle id, test target. Lint/format configs
 
 When `TOOLKIT_ARCH_CHECKS=true`, `lint` and every build additionally enforce:
 
-- `do_state_check` — no `@StateObject`/`@ObservedObject`/`@EnvironmentObject`/`@Published`/`ObservableObject`; `@State` only via the configured exclusion; functions live in state-class extension files, not the base file
+- `do_state_check` — no `@StateObject`/`@ObservedObject`/`@EnvironmentObject`/`@Published`/`ObservableObject`; `@State` allowed only with `// non-actionable: <reason>` on the same line; functions live in state-class extension files, not the base file
+- `do_concurrency_check` — no `nonisolated(unsafe)`, `@unchecked Sendable`, `DispatchQueue.global`, `.sync {}`, locks, semaphores, or synchronous file I/O without `// concurrent-safe: <reason>` on the same line; `AVCaptureSession` must be inside an actor
 - `do_section_marker_check` — `Queries → Handlers → Actions → Helpers` order, no `// MARK: -` dashes, no `private func` in Handlers
 - `do_handler_suffix_check` — `on<Subject><Event>` with an approved suffix list
 - `do_mark_spacing_check` — blank-line padding around `// MARK:`
@@ -84,7 +85,7 @@ _dispatch "$@"
 ## Commands
 
 `setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [iphone]` · `uninstall [iphone]` · `watch [iphone] [mode]` ·
-`test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
+`test [filter] [timeout]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
 `logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level]` · `e2e` · `e2e-run` ·
 `upload [--force] <text>` · `sentry <cmd>`
 

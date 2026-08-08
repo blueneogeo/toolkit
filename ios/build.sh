@@ -630,6 +630,50 @@ _require_server() {
     fi
 }
 
+do_tsan_test() {
+    _detect_project_config
+    _check_core_tools
+    _set_mode_sim
+    _validate_sim_target
+    _ensure_project
+    echo "Testing $PROJECT_NAME on $SIM_NAME ($SIM_OS) with Thread Sanitizer."
+    if [[ "${TOOLKIT_SERVER_ENABLED:-false}" == "true" ]]; then
+        _require_server
+    fi
+
+    local test_filter=""
+    local test_timeout=$TEST_TIMEOUT
+    for arg in "$@"; do
+        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+            test_timeout="$arg"
+        else
+            test_filter="$arg"
+        fi
+    done
+
+    echo "  Building tests for TSan..."
+    (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
+      -destination "$_TARGET_DEST" -configuration Debug \
+      build-for-testing 2>&1) || return 1
+
+    local test_args=(-project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
+      -destination "$_TARGET_DEST" -configuration Debug test-without-building \
+      -enableThreadSanitizer YES)
+
+    if [[ -n "$test_filter" ]]; then
+        test_args+=(-only-testing "$TEST_TARGET/$test_filter")
+        echo "  Running TSan tests filtered by '$test_filter' (timeout: ${test_timeout}s)..."
+    else
+        echo "  Running TSan tests... (timeout: ${test_timeout}s)"
+    fi
+
+    if command -v timeout &>/dev/null; then
+        (cd "$PROJECT_ROOT" && timeout "$test_timeout" xcodebuild "${test_args[@]}" 2>&1)
+    else
+        (cd "$PROJECT_ROOT" && xcodebuild "${test_args[@]}" 2>&1)
+    fi
+}
+
 do_test() {
     _detect_project_config
     _check_core_tools
@@ -729,10 +773,60 @@ do_state_check() {
         echo "  All state must live in the central state class (@Observable)."
         echo "  Views only read state properties and call state handlers."
         echo "  Functions in the state class file must live in extension files."
+        echo "  @State is allowed only with // non-actionable: <reason> on the same line."
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         return 1
     fi
     echo "✓ State check passed"
+}
+
+# ── Concurrency safety lint gate ─────────────────────────────────────
+
+do_concurrency_check() {
+    local src="$PROJECT_ROOT/$SOURCE_DIR"
+    local found=0
+
+    _conc_grep() {
+        local pattern="$1" msg="$2"
+        local matches
+        matches=$(grep -rn "$pattern" "$src" --include="*.swift" 2>/dev/null | grep -v '// concurrent-safe:' || true)
+        if [[ -n "$matches" ]]; then
+            echo ""
+            echo "  ✗ $msg"
+            while IFS= read -r line; do
+                echo "    ${line#$PROJECT_ROOT/}"
+            done <<< "$matches"
+            found=1
+        fi
+    }
+
+    _conc_grep 'nonisolated(unsafe)'     'nonisolated(unsafe) — last resort only: add // concurrent-safe: <reason> documenting the external synchronization mechanism that the compiler cannot see'
+    _conc_grep '@unchecked Sendable'     '@unchecked Sendable — last resort only: add // concurrent-safe: <reason> documenting the external synchronization mechanism that the compiler cannot see'
+    _conc_grep '@preconcurrency import'  '@preconcurrency import — only for system frameworks that have not adopted Swift Concurrency'
+    _conc_grep 'DispatchQueue\.global('  'DispatchQueue.global — forbidden. Use a named serial queue or actor'
+    _conc_grep '\.sync\s*\{'             '.sync { } — forbidden. Blocking calls cause deadlocks. Use actor isolation'
+    _conc_grep 'DispatchSemaphore'       'DispatchSemaphore — forbidden. Blocks the cooperative thread pool. Use actor isolation'
+    _conc_grep 'NSLock\|os_unfair_lock\|pthread_mutex' 'Lock (NSLock/os_unfair_lock/pthread_mutex) — forbidden. Must never be held across await. Use actor isolation'
+    _conc_grep 'Data(contentsOf:'        'Data(contentsOf:) — forbidden. Synchronous file I/O blocks the calling thread. Use actor-backed persistence'
+    _conc_grep 'String(contentsOf:'      'String(contentsOf:) — forbidden. Synchronous file I/O blocks the calling thread'
+    _conc_grep 'UIImage(contentsOfFile:' 'UIImage(contentsOfFile:) — forbidden. Synchronous file I/O blocks the calling thread'
+    _conc_grep 'MainActor\.assumeIsolated' 'MainActor.assumeIsolated — traps at runtime if wrong. Add // concurrent-safe: <invariant> documenting the guarantee'
+    _conc_grep 'captureSession\.startRunning\|captureSession\.stopRunning' 'AVCaptureSession start/stopRunning — must be inside an actor with a custom serial executor. Do not call from @MainActor'
+
+    if [[ $found -eq 1 ]]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  All code must be concurrency-safe by construction."
+        echo "  Use actors + Sendable structs. Manual synchronization,"
+        echo "  locks, semaphores, and synchronous I/O are forbidden."
+        echo "  // concurrent-safe: is ONLY for extreme cases where the"
+        echo "  compiler cannot see an external synchronization mechanism"
+        echo "  (e.g., a delegate callback known to run on a specific serial"
+        echo "  queue). It is not a workaround — restructure the code instead."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ Concurrency check passed"
 }
 
 do_structure_check() {
@@ -889,6 +983,7 @@ do_lint() {
 
     if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
         do_state_check || return 1
+        do_concurrency_check || return 1
         do_structure_check || return 1
     else
         do_try_check || return 1
@@ -1612,6 +1707,7 @@ _dispatch() {
         uninstall) shift; do_uninstall "$@" ;;
         watch)    shift; do_watch "$@" ;;
         test)     shift; do_test "$@" ;;
+        tsan-test) shift; do_tsan_test "$@" ;;
         e2e)      do_e2e false ;;
         e2e-run)  do_e2e true ;;
         sentry)   shift; _dispatch_sentry "$@" ;;
