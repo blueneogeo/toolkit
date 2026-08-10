@@ -125,7 +125,6 @@ _detect_project_config() {
     # Architecture-check configuration (used only when TOOLKIT_ARCH_CHECKS=true)
     TOOLKIT_STATE_CLASS="${TOOLKIT_STATE_CLASS:-AppState}"
     TOOLKIT_STATE_FILE="${TOOLKIT_STATE_FILE:-model/AppState.swift}"
-    STATE_EXCLUSION="${TOOLKIT_STATE_EXCLUSION:-@State private var appState = ${TOOLKIT_STATE_CLASS}()}"
     STATE_DIR="$(dirname "$SOURCE_DIR/$TOOLKIT_STATE_FILE")"
     STATE_BASENAME="$(basename "$TOOLKIT_STATE_FILE" .swift)"
     STATE_FILE_PATH="$SOURCE_DIR/$TOOLKIT_STATE_FILE"
@@ -701,14 +700,10 @@ do_state_check() {
     _state_grep 'ObservableObject' 'ObservableObject — convert to @Observable, then use the central state class'
 
     local state_matches
-    state_matches=$(grep -rn '@State' "$src" --include="*.swift" 2>/dev/null || true)
-    while IFS= read -r pattern; do
-        [[ -n "$pattern" ]] || continue
-        state_matches=$(echo "$state_matches" | grep -vF "$pattern")
-    done <<< "$STATE_EXCLUSION"
+    state_matches=$(grep -rn '@State' "$src" --include="*.swift" 2>/dev/null | grep -v '// non-actionable:' || true)
     if [[ -n "$state_matches" ]]; then
         echo ""
-        echo "  ✗ @State — move to the central state class instead"
+        echo "  ✗ @State — add // non-actionable: <reason> on the same line, or move to the central state class"
         while IFS= read -r line; do
             echo "    ${line#$PROJECT_ROOT/}"
         done <<< "$state_matches"
