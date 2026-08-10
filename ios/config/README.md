@@ -1,6 +1,6 @@
 # ios-toolkit — generic iOS build toolkit
 
-Part of the shared `toolkit/` monorepo (`ios/`, plus future `android/`, `go/`, `web/`).
+Part of the shared `toolkit/` monorepo (`ios/`, `server/`, plus future `android/`, `web/`).
 A drop-in build system for any iOS app: mount the toolkit in your project, add a thin
 `build.sh` entry, run `./build.sh setup`, and it builds — with zero configuration for
 everything that doesn't need it. Online features (Sentry, TestFlight upload, E2E, server)

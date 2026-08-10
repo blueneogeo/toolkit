@@ -31,3 +31,4 @@ per-project via the platform's `./build.sh configure`.
 ## Per-platform docs
 
 - `ios/config/README.md` — full iOS toolkit reference
+- `server/config/README.md` — full server toolkit reference
