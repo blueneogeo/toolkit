@@ -1,0 +1,27 @@
+# build.properties — project configuration for server toolkit
+# Generated from toolkit/server/config/build.properties.example by `./build.sh setup`.
+# Everything is auto-detected unless overridden below.
+
+# ── Server ────────────────────────────────────────────────────────────
+# SERVER_PORT=8080                 # port the server listens on
+# SERVER_CMD_PATH=./cmd/server     # path to the main package (relative to PROJECT_ROOT)
+# SERVER_BIN_PATH=bin/server       # output path for the built binary
+
+# ── Build ─────────────────────────────────────────────────────────────
+# LOCALE_SRC=../shared/locales/    # source directory for locale files (copied before build)
+# LOCALE_DST=internal/locale/      # destination directory for locale files
+
+# ── Test ──────────────────────────────────────────────────────────────
+# TEST_TIMEOUT=120                 # timeout in seconds for tests
+# WATCH_COOLDOWN=1.0               # debounce cooldown for watch mode (seconds)
+
+# ── Online features (all OFF by default) ──────────────────────────────
+# TOOLKIT_SERVER_SENTRY_ENABLED=false  # `sentry` queries (needs SENTRY_ORG + SERVER_SENTRY_PROJECT)
+
+# ── Sentry ────────────────────────────────────────────────────────────
+# SERVER_SENTRY_PROJECT=go
+
+# ── Fly.io ────────────────────────────────────────────────────────────
+# FLY_APP=
+# FLY_DB_CLUSTER=
+# GITHUB_REPO=

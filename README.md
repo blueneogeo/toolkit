@@ -7,10 +7,10 @@ generate a thin `build.sh` entry via `./build.sh`-style scaffolding.
 ## Platforms
 
 | Folder | Status | Use |
-|---|---|---|
+|---|---|---|---|
 | `ios/` | ready | iOS app builds, lint gates, install/watch/test, logs/debug, e2e, TestFlight upload, Sentry queries |
+| `server/` | ready | Go server builds, start/stop/watch, lint/test, deploy/rollback (Fly.io), migrations, Sentry queries |
 | `android/` | planned | — |
-| `go/` | planned | server tooling |
 | `web/` | planned | — |
 
 ## Adding the toolkit to a project

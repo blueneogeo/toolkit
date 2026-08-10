@@ -111,33 +111,62 @@ gen_aggregator() {
         ok "root build.sh already present (kept)"
         return 0
     fi
-    cat > "$entry" <<EOF
-#!/bin/bash
-set -euo pipefail
-SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-usage() {
-    cat <<USAGE
-Usage: ./build.sh <target> <command>
-Targets: $(printf '%s ' "${platforms[@]}")
-USAGE
-}
-case "\${1:-}" in
-$(for p in "${platforms[@]}"; do
-    d=$(platform_dir "$p")
-    if [[ "$p" == "ios-root" ]]; then
-        echo "    *) usage ;;"
-    else
-        echo "    $p)"
-        echo "        shift"
-        echo "        cd \"\$SCRIPT_DIR/$d\" && exec ./build.sh \"\$@\""
-        echo "        ;;"
-    fi
-done)
-    *) usage ;;
-esac
-EOF
+
+    local has_ios=false has_server=false
+    for p in "${platforms[@]}"; do
+        [[ "$p" == "ios" || "$p" == "ios-root" ]] && has_ios=true
+        [[ "$p" == "server" ]] && has_server=true
+    done
+
+    {
+        echo '#!/bin/bash'
+        echo 'set -euo pipefail'
+        echo 'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"'
+        echo ''
+
+        if $has_ios && $has_server; then
+            echo 'source "$SCRIPT_DIR/toolkit/shared/build-utils.sh"'
+            echo 'source "$SCRIPT_DIR/toolkit/shared/debug.sh"'
+            echo ''
+            echo 'SERVER_LOG_DIR="$SCRIPT_DIR/server/.watch"'
+            echo 'SERVER_LOG_FILE="server.log"'
+            echo ''
+        fi
+
+        echo 'usage() {'
+        echo '    cat <<USAGE'
+        local target_list="${platforms[*]}"
+        if $has_ios && $has_server; then
+            target_list="$target_list debug"
+        fi
+        echo "Usage: ./build.sh <target> <command>"
+        echo "Targets: $target_list"
+        echo 'USAGE'
+        echo '}'
+
+        echo 'case "${1:-}" in'
+        for p in "${platforms[@]}"; do
+            d=$(platform_dir "$p")
+            if [[ "$p" == "ios-root" ]]; then
+                echo '    *) usage ;;'
+            else
+                echo "    $p)"
+                echo '        shift'
+                echo "        cd \"\$SCRIPT_DIR/$d\" && exec ./build.sh \"\$@\""
+                echo '        ;;'
+            fi
+        done
+
+        if $has_ios && $has_server; then
+            echo '    debug) shift; _do_combined_debug "$@" ;;'
+        fi
+
+        echo '    *) usage ;;'
+        echo 'esac'
+    } > "$entry"
+
     chmod +x "$entry"
-    ok "generated multi-platform root build.sh (targets: $(printf '%s ' "${platforms[@]}"))"
+    ok "generated multi-platform root build.sh (targets: $target_list)"
 }
 
 gen_single_entry() {

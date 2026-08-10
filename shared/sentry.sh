@@ -1,6 +1,6 @@
-# ios-toolkit/shared/sentry.sh — generic Sentry queries (gated by TOOLKIT_SENTRY_ENABLED)
+# toolkit/shared/sentry.sh — generic Sentry queries (gated by TOOLKIT_SENTRY_ENABLED)
 # Provides: _sentry_auth_token, _sentry_events, _sentry_issues, _sentry_event_detail, _sentry_dispatch
-# Depends on: PROJECT_ROOT, SENTRY_ORG, IOS_SENTRY_PROJECT (config)
+# Depends on: PROJECT_ROOT, SENTRY_ORG (loaded by platform _load_config)
 
 # ── Auth ──────────────────────────────────────────────────────────────
 

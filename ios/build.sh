@@ -30,8 +30,8 @@ else
     PROJECT_ROOT="$(_find_project_root)"
 fi
 
-source "$SCRIPT_DIR/shared/build-utils.sh"
-source "$SCRIPT_DIR/shared/sentry.sh"
+source "$SCRIPT_DIR/../shared/build-utils.sh"
+source "$SCRIPT_DIR/../shared/sentry.sh"
 source "$SCRIPT_DIR/build-lifecycle.sh"
 source "$SCRIPT_DIR/build-e2e.sh"
 source "$SCRIPT_DIR/build-upload.sh"
@@ -701,7 +701,11 @@ do_state_check() {
     _state_grep 'ObservableObject' 'ObservableObject — convert to @Observable, then use the central state class'
 
     local state_matches
-    state_matches=$(grep -rn '@State' "$src" --include="*.swift" 2>/dev/null | grep -vF "$STATE_EXCLUSION" || true)
+    state_matches=$(grep -rn '@State' "$src" --include="*.swift" 2>/dev/null || true)
+    while IFS= read -r pattern; do
+        [[ -n "$pattern" ]] || continue
+        state_matches=$(echo "$state_matches" | grep -vF "$pattern")
+    done <<< "$STATE_EXCLUSION"
     if [[ -n "$state_matches" ]]; then
         echo ""
         echo "  ✗ @State — move to the central state class instead"

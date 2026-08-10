@@ -1,4 +1,4 @@
-# ios-toolkit/shared/build-utils.sh — generic helpers
+# toolkit/shared/build-utils.sh — generic helpers (sourced by all platform toolkits)
 # Provides: _tty_green, _tty_red, _tty_yellow, _tty_reset, _pid_running, _require_cmd, _fmt_server_log
 
 # ── Color helpers ──────────────────────────────────────────────────

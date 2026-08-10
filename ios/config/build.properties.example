@@ -45,6 +45,8 @@
 # SERVER_START_CMD=
 # SERVER_STOP_CMD=
 # E2E_BASE_URL=http://localhost:8080
+# E2E_HEALTH_URL=/api/ping        # health endpoint for server detection (default: /api/ping)
+# E2E_SEED_SCRIPT=                # path (relative to PROJECT_ROOT) to a seed-data script for E2E tests
 
 # ── Misc ─────────────────────────────────────────────────────────────
 # DEV_BUNDLE_SUFFIX=              # e.g. .dev to use a debug bundle id for sim/device builds

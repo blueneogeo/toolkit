@@ -6,7 +6,7 @@
 #             _TARGET_SDK, _TARGET_DEST, _TARGET_NAME, _BUILD_EXTRA (build.sh)
 # Depends on: _require_cmd (shared/build-utils.sh)
 # Optional: E2E_SCHEME (default ${PROJECT_NAME}E2E), SERVER_START_CMD, E2E_SEED_SCRIPT,
-#           E2E_ENV_<NAME>="value" environment passthrough
+#           E2E_HEALTH_URL (default /api/ping), E2E_ENV_<NAME>="value" environment passthrough
 
 _require_e2e() {
     if [[ "${TOOLKIT_E2E_ENABLED:-false}" != "true" ]]; then
@@ -34,10 +34,11 @@ do_e2e() {
 
     local e2e_scheme="${E2E_SCHEME:-${PROJECT_NAME}E2E}"
     local base_url="${E2E_BASE_URL:-}"
+    local health_url="${E2E_HEALTH_URL:-/api/ping}"
     local started_server=false
 
     if [[ -n "$base_url" && -n "${SERVER_START_CMD:-}" ]]; then
-        if ! curl -fsS "$base_url/api/ping" >/dev/null 2>&1; then
+        if ! curl -fsS "${base_url}${health_url}" >/dev/null 2>&1; then
             echo "→ Starting local server..."
             eval "$SERVER_START_CMD"
             started_server=true
