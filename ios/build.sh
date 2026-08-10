@@ -50,16 +50,14 @@ WATCH_COOLDOWN=2.0
 # ── Config ──────────────────────────────────────────────────────────
 
 _load_config() {
-    local props=""
-    for p in "$PROJECT_ROOT/build.properties" "$PROJECT_ROOT/../build.properties"; do
-        if [[ -f "$p" ]]; then
-            props="$p"
-            break
-        fi
-    done
-    if [[ -n "$props" ]]; then
+    if [[ -f "$PROJECT_ROOT/../build.properties" ]]; then
         set -a
-        source "$props"
+        source "$PROJECT_ROOT/../build.properties"
+        set +a
+    fi
+    if [[ -f "$PROJECT_ROOT/build.properties" ]]; then
+        set -a
+        source "$PROJECT_ROOT/build.properties"
         set +a
     fi
 
