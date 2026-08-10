@@ -241,7 +241,7 @@ do_upload() {
         MATCH_PASSWORD="$MATCH_PASSWORD" \
         SENTRY_ORG="$SENTRY_ORG" \
         IOS_SENTRY_PROJECT="$IOS_SENTRY_PROJECT" \
-        $bundle_cmd exec fastlane "$fastlane_lane" 2>&1 \
+        $bundle_cmd exec fastlane $fastlane_lane 2>&1 \
         | tee "$_upload_out" \
         | grep --line-buffered -E "$_upload_filter" \
         | sed -E -l -e 's/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]: //' -e 's/^▸ //' -e 's/'$'\x1b''\[[0-9;]*m//g' -e 's/^/  /'; then
