@@ -965,13 +965,13 @@ do_handler_suffix_check() {
 do_lint() {
     _require_cmd swiftlint "Install with: brew install swiftlint"
     local output
+    local exit_code
     local lint_args=(--strict --quiet)
     if [[ -n "$SWIFTLINT_CONFIG" ]]; then
         lint_args+=(--config "$SWIFTLINT_CONFIG")
     fi
-    output=$(cd "$PROJECT_ROOT" && swiftlint "${lint_args[@]}" 2>&1) || true
-    local exit_code=$?
-    if [[ $exit_code -ne 0 ]] || echo "$output" | grep -qi "warning:"; then
+    output=$(cd "$PROJECT_ROOT" && swiftlint "${lint_args[@]}" 2>&1) && exit_code=0 || exit_code=$?
+    if [[ $exit_code -ne 0 ]] || echo "$output" | grep -qiE "warning:|error:"; then
         echo "✗ Lint failed:"
         [[ -n "$output" ]] && echo "$output"
         echo "✗ Lint failed — fix violations before building."
