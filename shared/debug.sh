@@ -10,7 +10,12 @@ _do_combined_debug() {
     local log_dir="${SERVER_LOG_DIR:-.watch}"
     local log_file="${log_dir}/${SERVER_LOG_FILE:-server.log}"
 
+    local ios_target_args=()
     set -f
+    while [[ "${1:-}" != "" && "${1:-}" != --* ]]; do
+        ios_target_args+=("$1")
+        shift
+    done
     while [[ "${1:-}" == --* ]]; do
         case "$1" in
             --cat) cat_args=(--cat "$2"); shift 2 ;;
@@ -21,7 +26,7 @@ _do_combined_debug() {
     done
     set +f
 
-    local server_log_path="$SCRIPT_DIR/server/$log_file"
+    local server_log_path="$log_file"
     if [[ ! -f "$server_log_path" ]]; then
         echo "✗ Local server not running (no log at $server_log_path). Start with: ./build.sh server start"
         return 1
@@ -53,11 +58,11 @@ _do_combined_debug() {
     [[ ${#script_args[@]} -gt 0 ]] && ios_debug_args+=("${script_args[@]}")
 
     if [[ ${#ios_debug_args[@]} -gt 0 ]]; then
-        (cd "$SCRIPT_DIR/ios" && ./build.sh debug "${ios_debug_args[@]}") | while IFS= read -r line; do
+        (cd "$SCRIPT_DIR/ios" && ./build.sh debug "${ios_target_args[@]}" "${ios_debug_args[@]}") | while IFS= read -r line; do
             echo "[ios] $line"
         done
     else
-        (cd "$SCRIPT_DIR/ios" && ./build.sh debug) | while IFS= read -r line; do
+        (cd "$SCRIPT_DIR/ios" && ./build.sh debug "${ios_target_args[@]}") | while IFS= read -r line; do
             echo "[ios] $line"
         done
     fi

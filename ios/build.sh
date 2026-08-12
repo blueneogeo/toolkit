@@ -1339,6 +1339,9 @@ _ios_logs() {
     local cat_filter=""
     local level_filter=""
     local cmd=""
+    case "${1:-}" in
+        iphone|device|simulator) shift ;;
+    esac
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --cat) cat_filter="${2:-}"; shift 2 ;;
@@ -1357,10 +1360,10 @@ _ios_logs() {
                     _require_cmd idevicesyslog "Install with: brew install libimobiledevice"
                     if [[ -n "$cat_filter" ]]; then
                         echo "→ Streaming device logs (filter: $cat_filter, Ctrl-C to stop)..."
-                        idevicesyslog 2>/dev/null | grep --line-buffered "$APP_EXECUTABLE" | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        idevicesyslog 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
                     else
                         echo "→ Streaming device logs (Ctrl-C to stop)..."
-                        idevicesyslog 2>/dev/null | grep --line-buffered "$APP_EXECUTABLE" | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        idevicesyslog 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
                     fi
                     ;;
                 iphonesimulator)
@@ -1463,6 +1466,9 @@ _ios_debug() {
         return 1
     fi
     _select_target "${1:-simulator}"
+    case "${1:-}" in
+        iphone|device|simulator) shift ;;
+    esac
     local cat_filter=""
     local level_filter=""
     local script_names=""
@@ -1492,29 +1498,12 @@ EOF
     case "$_TARGET_SDK" in
         iphoneos)
             _require_cmd idevicesyslog "Install with: brew install libimobiledevice"
-            do_install
-            if [[ -n "$script_names" ]]; then
-                _write_scriptor_marker
-            fi
-            local tmpfile fifo syslog_pid pipe_pid
-            tmpfile=$(mktemp)
+            local fifo syslog_pid pipe_pid reader_pid
             fifo=$(mktemp -u)
             mkfifo "$fifo"
-            idevicesyslog 2>/dev/null > "$tmpfile" &
+            idevicesyslog 2>/dev/null | grep --line-buffered "$APP_EXECUTABLE" > "$fifo" &
             syslog_pid=$!
-            local waited=0
-            while [[ $waited -lt 5 ]]; do
-                [[ -s "$tmpfile" ]] && break
-                sleep 0.5
-                ((waited++))
-            done
-            if [[ ! -s "$tmpfile" ]]; then
-                echo ""
-                echo "✗ No log data from device. Is it connected and unlocked?"
-                kill "$syslog_pid" 2>/dev/null
-                rm -f "$fifo" "$tmpfile" 2>/dev/null || true
-                return 1
-            fi
+            pipe_pid=$!
             echo ""
             if [[ -n "$cat_filter" ]]; then
                 echo "→ Debug session started (filter: $cat_filter). Go to home screen to stop."
@@ -1522,50 +1511,77 @@ EOF
                 echo "→ Debug session started. Go to home screen to stop."
             fi
             echo ""
-            tail -n 0 -f "$tmpfile" | grep --line-buffered "$APP_EXECUTABLE" > "$fifo" &
-            pipe_pid=$!
-            while IFS= read -r line; do
-                if [[ -z "$cat_filter" ]] || [[ "$line" == *"[${cat_filter}]"* ]] || [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
-                    formatted=$(echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /')
-                    if [[ -n "$level_filter" ]]; then
-                        level_token="${formatted#*  }"
-                        level_token="${level_token%% *}"
-                        case "$level_filter" in
-                            info)    [[ "$level_token" != "DEBUG" ]] && echo "$formatted" ;;
-                            warning) [[ "$level_token" != "DEBUG" && "$level_token" != "INFO" ]] && echo "$formatted" ;;
-                            error)   [[ "$level_token" == "WARNING" || "$level_token" == "ERROR" ]] && echo "$formatted" ;;
-                        esac
-                    else
-                        echo "$formatted"
+            {
+                local app_launched=false
+                while true; do
+                    if read -r -t 2 line; then
+                        if [[ -z "$cat_filter" ]] || [[ "$line" == *"[${cat_filter}]"* ]] || [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
+                            formatted=$(echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /')
+                            if [[ -n "$level_filter" ]]; then
+                                level_token="${formatted#*  }"
+                                level_token="${level_token%% *}"
+                                case "$level_filter" in
+                                    info)    [[ "$level_token" != "DEBUG" ]] && echo "$formatted" ;;
+                                    warning) [[ "$level_token" != "DEBUG" && "$level_token" != "INFO" ]] && echo "$formatted" ;;
+                                    error)   [[ "$level_token" == "WARNING" || "$level_token" == "ERROR" ]] && echo "$formatted" ;;
+                                esac
+                            else
+                                echo "$formatted"
+                            fi
+                        fi
+                        if [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
+                            break
+                        fi
+                        app_launched=true
+                    elif $app_launched; then
+                        if ! pgrep -x "$APP_EXECUTABLE" > /dev/null 2>&1; then
+                            break
+                        fi
                     fi
-                fi
-                if [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
-                    break
-                fi
-            done < "$fifo"
+                done < "$fifo"
+            } &
+            reader_pid=$!
+            do_install
+            if [[ -n "$script_names" ]]; then
+                _write_scriptor_marker
+            fi
+            wait "$reader_pid" 2>/dev/null || true
             kill -9 "$pipe_pid" 2>/dev/null; { wait "$pipe_pid"; } 2>/dev/null || true
-            kill -9 "$syslog_pid" 2>/dev/null; { wait "$syslog_pid"; } 2>/dev/null || true
-            rm -f "$fifo" "$tmpfile" 2>/dev/null || true
+            rm -f "$fifo" 2>/dev/null || true
             ;;
+
         iphonesimulator)
             do_install
             if [[ -n "$script_names" ]]; then
                 _write_scriptor_marker
             fi
             echo ""
-            if [[ -n "$cat_filter" ]]; then
+            if [[ "$cat_filter" == "all" ]]; then
+                echo "→ Debug session started (all logs). Go to home screen to stop."
+            elif [[ -n "$cat_filter" ]]; then
                 echo "→ Debug session started (filter: $cat_filter). Go to home screen to stop."
             else
-                echo "→ Debug session started. Go to home screen to stop."
+                echo "→ Debug session started (Turn logger only). Go to home screen to stop."
             fi
             echo ""
+
             local fifo pipe_pid
             fifo=$(mktemp -u)
             mkfifo "$fifo"
             log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null > "$fifo" &
             pipe_pid=$!
             while IFS= read -r line; do
-                if [[ -z "$cat_filter" ]] || [[ "$line" == *"[${cat_filter}]"* ]] || [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
+                local show=false
+                if [[ "$cat_filter" == "all" ]]; then
+                    show=true
+                elif [[ -n "$cat_filter" ]]; then
+                    [[ "$line" == *"[${cat_filter}]"* ]] && show=true
+                else
+                    [[ "$line" == *"[turn]"* ]] && show=true
+                fi
+                [[ "$line" == *"DEBUG_SESSION_ENDED"* ]] && show=true
+
+                if $show; then
                     formatted=$(echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /')
                     if [[ -n "$level_filter" ]]; then
                         level_token="${formatted#*  }"
