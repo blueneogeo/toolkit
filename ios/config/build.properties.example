@@ -28,6 +28,7 @@
 # ── Architecture check config (used when TOOLKIT_ARCH_CHECKS=true) ──
 # TOOLKIT_STATE_CLASS=AppState          # central @Observable state class name
 # TOOLKIT_STATE_FILE=model/AppState.swift  # path to the state class file (relative to SOURCE_DIR)
+# TOOLKIT_TRANSPORT_FILE=service/APIClient.swift  # path to the transport; enables transport purity/construction gates (empty = skip)
 # TOOLKIT_CONCURRENCY_CHECKS=true       # enforce concurrency safety gates (nonisolated(unsafe), locks, etc.)
 
 # ── Concurrency safety model ─────────────────────────────────────────

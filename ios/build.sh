@@ -126,6 +126,8 @@ _detect_project_config() {
     STATE_DIR="$(dirname "$SOURCE_DIR/$TOOLKIT_STATE_FILE")"
     STATE_BASENAME="$(basename "$TOOLKIT_STATE_FILE" .swift)"
     STATE_FILE_PATH="$SOURCE_DIR/$TOOLKIT_STATE_FILE"
+    # Optional transport file/class (empty disables transport purity + construction checks)
+    TOOLKIT_TRANSPORT_FILE="${TOOLKIT_TRANSPORT_FILE:-}"
 
     SWIFTLINT_CONFIG="${SWIFTLINT_CONFIG:-$(_find_up .swiftlint.yml || true)}"
     PERIPHERY_CONFIG="${PERIPHERY_CONFIG:-$(_find_up .periphery.yml || true)}"
@@ -962,6 +964,183 @@ do_handler_suffix_check() {
     echo "✓ Handler suffixes passed"
 }
 
+do_handler_visibility_check() {
+    local src="$PROJECT_ROOT/$SOURCE_DIR"
+    local matches
+    matches=$(grep -rn 'private func on[A-Z]' "$src" --include="*.swift" 2>/dev/null || true)
+    if [[ -n "$matches" ]]; then
+        echo ""
+        echo "  ✗ Private handlers — handlers (on<Subject><Event>) are public; private imperative work belongs in Actions"
+        while IFS= read -r line; do
+            echo "    ${line#$PROJECT_ROOT/}"
+        done <<< "$matches"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Handlers are called by views and must not be private."
+        echo "  Private imperative work loses the 'on' prefix (an action)."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ Handler visibility passed"
+}
+
+do_observable_class_check() {
+    local src="$PROJECT_ROOT/$SOURCE_DIR"
+    local violations=""
+    local file
+    while IFS= read -r file; do
+        local lineno
+        while IFS= read -r lineno; do
+            local prev next
+            prev=$(sed -n "$((lineno - 1))p" "$file" 2>/dev/null || true)
+            next=$(sed -n "$((lineno + 1))p" "$file" 2>/dev/null || true)
+            if [[ "$prev" != *"@MainActor"* || "$next" != *"final class"* ]]; then
+                violations+="  ${file#$PROJECT_ROOT/}:$lineno @Observable must have @MainActor on the line above and final class on the line below"$'\n'
+            fi
+        done < <(grep -n '@Observable' "$file" 2>/dev/null | cut -d: -f1)
+    done < <(grep -rln '@Observable' "$src" --include="*.swift" 2>/dev/null)
+    if [[ -n "$violations" ]]; then
+        echo ""
+        echo "  ✗ @Observable state classes must be @MainActor final classes"
+        echo "$violations"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Domain state classes are @MainActor @Observable final classes."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ Observable class shape passed"
+}
+
+do_root_immutability_check() {
+    local file="$PROJECT_ROOT/$STATE_FILE_PATH"
+    if [[ ! -f "$file" ]]; then
+        echo "✓ Root immutability passed (no state file)"
+        return 0
+    fi
+    local matches
+    matches=$(grep -nE '\bvar\b' "$file" 2>/dev/null || true)
+    if [[ -n "$matches" ]]; then
+        echo ""
+        echo "  ✗ Mutable state on the composition root — the root holds only 'let' state instances and resources"
+        while IFS= read -r line; do
+            echo "    ${TOOLKIT_STATE_FILE}:$line"
+        done <<< "$matches"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Mutable state belongs in a domain state class, not the root."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ Root immutability passed"
+}
+
+do_reset_presence_check() {
+    local src="$PROJECT_ROOT/$STATE_DIR"
+    local violations=""
+    local file
+    while IFS= read -r file; do
+        if grep -q '@Observable' "$file" 2>/dev/null && ! grep -q 'func reset' "$file" 2>/dev/null; then
+            violations+="  ${file#$PROJECT_ROOT/}: @Observable state class missing func reset()"$'\n'
+        fi
+    done < <(find "$src" -name "${STATE_BASENAME}+*.swift" -type f 2>/dev/null)
+    if [[ -n "$violations" ]]; then
+        echo ""
+        echo "  ✗ Domain state classes must define reset()"
+        echo "$violations"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Every @MainActor @Observable domain state class needs a reset()."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ reset() presence passed"
+}
+
+do_mark_allowlist_check() {
+    local src="$PROJECT_ROOT/$STATE_DIR"
+    local violations=""
+    local file
+    while IFS= read -r file; do
+        while IFS= read -r line; do
+            local lineno marker
+            lineno="${line%%:*}"
+            marker=$(sed 's/.*MARK: *//' <<< "$line")
+            case "$marker" in
+                Queries|Handlers|Actions|Helpers) continue ;;
+                *) violations+="  ${file#$PROJECT_ROOT/}:$lineno '// MARK: $marker' — only Queries/Handlers/Actions/Helpers are allowed here (class bodies use blank-line grouping)"$'\n' ;;
+            esac
+        done < <(grep -n '// MARK:' "$file" 2>/dev/null)
+    done < <(find "$src" -name "${STATE_BASENAME}+*.swift" -type f 2>/dev/null)
+    if [[ -n "$violations" ]]; then
+        echo ""
+        echo "  ✗ Unrecognized section markers"
+        echo "$violations"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  State class bodies group properties with blank lines, not // MARK:."
+        echo "  Extensions use only Queries / Handlers / Actions / Helpers."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ MARK allowlist passed"
+}
+
+do_transport_purity_check() {
+    if [[ -z "$TOOLKIT_TRANSPORT_FILE" ]]; then
+        echo "✓ Transport purity passed (no transport configured)"
+        return 0
+    fi
+    local file="$PROJECT_ROOT/$SOURCE_DIR/$TOOLKIT_TRANSPORT_FILE"
+    if [[ ! -f "$file" ]]; then
+        echo "✓ Transport purity passed (transport file not found)"
+        return 0
+    fi
+    local matches
+    matches=$(grep -nE 'UserDefaults|ProcessInfo|Bundle\.main|object\(forInfoDictionaryKey' "$file" 2>/dev/null || true)
+    if [[ -n "$matches" ]]; then
+        echo ""
+        echo "  ✗ Transport reads configuration — it takes config via init and never reads UserDefaults/env/plist"
+        while IFS= read -r line; do
+            echo "    ${TOOLKIT_TRANSPORT_FILE}:$line"
+        done <<< "$matches"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  The transport is configuration-free: everything arrives via init."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ Transport purity passed"
+}
+
+do_transport_construction_check() {
+    if [[ -z "$TOOLKIT_TRANSPORT_FILE" ]]; then
+        echo "✓ Transport construction passed (no transport configured)"
+        return 0
+    fi
+    local class src matches
+    class=$(basename "$TOOLKIT_TRANSPORT_FILE" .swift)
+    src="$PROJECT_ROOT/$SOURCE_DIR"
+    matches=$(grep -rnE "(^|[^[:alnum:]_])${class}\\(\\)" "$src" --include="*.swift" 2>/dev/null || true)
+    if [[ -n "$matches" ]]; then
+        echo ""
+        echo "  ✗ Zero-argument transport construction — pass the base URL explicitly, or use the shared environment client"
+        while IFS= read -r line; do
+            echo "    ${line#$PROJECT_ROOT/}"
+        done <<< "$matches"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  The transport is never default-constructed; its config is resolved once"
+        echo "  at the composition root and injected."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ Transport construction passed"
+}
+
+do_arch_checks() {
+    do_handler_visibility_check || return 1
+    do_observable_class_check || return 1
+    do_root_immutability_check || return 1
+    do_reset_presence_check || return 1
+    do_mark_allowlist_check || return 1
+    do_transport_purity_check || return 1
+    do_transport_construction_check || return 1
+}
+
 do_lint() {
     _require_cmd swiftlint "Install with: brew install swiftlint"
     local output
@@ -983,6 +1162,7 @@ do_lint() {
         do_state_check || return 1
         do_concurrency_check || return 1
         do_structure_check || return 1
+        do_arch_checks || return 1
     else
         do_try_check || return 1
     fi
