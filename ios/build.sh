@@ -719,6 +719,132 @@ do_test() {
 
 # ── Architecture lint gates ──────────────────────────────────────────
 
+# Override convention shared by every heuristic gate in this file:
+#   // lint:allow <rule-id> <reason>
+# The rule-id must be one of KNOWN_OVERRIDE_RULES and the reason must be
+# non-empty. Hard-forbidden gates (do_any_check, the hard concurrency tier)
+# do not honor overrides at all — those must be restructured, not annotated.
+KNOWN_OVERRIDE_RULES='message-bus view-state-mutation uikit-from-state'
+
+_allow_filter() {
+    # Filter out lines carrying a valid // lint:allow <rule> <reason> override.
+    grep -vE "// lint:allow ${1} [^[:space:]].*" || true
+}
+
+do_override_syntax_check() {
+    local src="$PROJECT_ROOT/$SOURCE_DIR"
+    local found=0
+    local line rest rule reason
+    while IFS= read -r line; do
+        rest="${line#*// lint:allow }"
+        rule="${rest%% *}"
+        if [[ " $KNOWN_OVERRIDE_RULES " != *" $rule "* ]]; then
+            echo "  ✗ unknown override rule '${rule}': ${line#$PROJECT_ROOT/}"
+            found=1
+            continue
+        fi
+        reason="${rest#"$rule"}"
+        reason="${reason# }"
+        if [[ -z "$reason" ]]; then
+            echo "  ✗ override missing reason: ${line#$PROJECT_ROOT/}"
+            found=1
+        fi
+    done < <(grep -rn '// lint:allow' "$src" --include="*.swift" 2>/dev/null || true)
+    if [[ $found -eq 1 ]]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  // lint:allow <rule-id> <reason> — rule-id must be one of:"
+        echo "  $KNOWN_OVERRIDE_RULES"
+        echo "  A reason is mandatory; unknown rule-ids do not suppress."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ lint:allow override syntax passed"
+}
+
+do_any_check() {
+    local src="$PROJECT_ROOT/$SOURCE_DIR"
+    local violations
+    violations=$(grep -rnE 'as\?[[:space:]]*Any\b|as![[:space:]]*Any\b|\[Any\]' "$src" --include="*.swift" 2>/dev/null || true)
+    if [[ -n "$violations" ]]; then
+        echo ""
+        echo "  ✗ Any type erasure — casts to Any, force-casts to Any, and [Any] collections erase type information"
+        while IFS= read -r line; do
+            echo "    ${line#$PROJECT_ROOT/}"
+        done <<< "$violations"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  'Any' erases type information. This gate has no override — restructure."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ Any-erasure check passed"
+}
+
+do_message_bus_check() {
+    local state_src="$PROJECT_ROOT/$STATE_DIR"
+    local found=0
+    local matches
+
+    _mb_grep() {
+        local dir="$1" pattern="$2" msg="$3"
+        local matches
+        matches=$(grep -rnE "$pattern" "$dir" --include="*.swift" 2>/dev/null | _allow_filter message-bus || true)
+        if [[ -n "$matches" ]]; then
+            echo ""
+            echo "  ✗ $msg"
+            while IFS= read -r line; do
+                echo "    ${line#$PROJECT_ROOT/}"
+            done <<< "$matches"
+            found=1
+        fi
+    }
+
+    _mb_grep "$state_src" 'var[[:space:]]+[a-zA-Z0-9_]*(Trigger|Counter|Version|Flag)[a-zA-Z0-9_]*' 'Incrementing signal counters on state are a message-bus anti-pattern — model the change as a value, not a signal'
+
+    if [[ $found -eq 1 ]]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  State is data + self-contained logic, not a view-to-view signaling bus."
+        echo "  Override with: // lint:allow message-bus <reason>"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ message-bus check passed"
+}
+
+do_view_state_mutation_check() {
+    local view_src="$PROJECT_ROOT/$SOURCE_DIR/view"
+    local found=0
+    local matches=""
+
+    _mutation_grep() {
+        local pattern="$1"
+        local m
+        m=$(grep -rnE "$pattern" "$view_src" --include="*.swift" 2>/dev/null | grep -v '==' | _allow_filter view-state-mutation || true)
+        [[ -n "$m" ]] && matches+="$m"$'\n'
+    }
+
+    _mutation_grep 'state\.[a-zA-Z]+\.[a-zA-Z0-9_]+[[:space:]]*[&+*/-]+='
+    _mutation_grep 'state\.[a-zA-Z]+\.[a-zA-Z0-9_]+[[:space:]]*=[[:space:]]'
+    _mutation_grep 'self\.state\.[a-zA-Z]+\.[a-zA-Z0-9_]+[[:space:]]*=[[:space:]]'
+
+    if [[ -n "$matches" ]]; then
+        echo ""
+        echo "  ✗ Views must not mutate state directly — route through an on<Subject><Event> handler"
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && echo "    ${line#$PROJECT_ROOT/}"
+        done <<< "$matches"
+        found=1
+    fi
+    if [[ $found -eq 1 ]]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Views read state and call handlers; they never assign into it."
+        echo "  Override with: // lint:allow view-state-mutation <reason>"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ view state mutation check passed"
+}
+
 do_state_check() {
     local src="$PROJECT_ROOT/$SOURCE_DIR"
     local found=0
@@ -742,6 +868,17 @@ do_state_check() {
     _state_grep '@EnvironmentObject' '@EnvironmentObject — use the central state class instead'
     _state_grep '@Published'       '@Published — use the central state class instead'
     _state_grep 'ObservableObject' 'ObservableObject — convert to @Observable, then use the central state class'
+
+    local uikit_matches
+    uikit_matches=$(grep -rn 'UIApplication\.shared\.sendAction\|resignFirstResponder' "$PROJECT_ROOT/$STATE_DIR" --include="*.swift" 2>/dev/null | _allow_filter uikit-from-state || true)
+    if [[ -n "$uikit_matches" ]]; then
+        echo ""
+        echo "  ✗ UIKit responder-chain manipulation in state — move keyboard dismissal into the view layer"
+        while IFS= read -r line; do
+            echo "    ${line#$PROJECT_ROOT/}"
+        done <<< "$uikit_matches"
+        found=1
+    fi
 
     local state_matches
     state_matches=$(grep -rn '@State' "$src" --include="*.swift" 2>/dev/null | grep -v '// non-actionable:' || true)
@@ -800,18 +937,35 @@ do_concurrency_check() {
         fi
     }
 
+    _conc_grep_hard() {
+        # Hard-forbidden: no // concurrent-safe: override. Restructure instead.
+        local pattern="$1" msg="$2"
+        local matches
+        matches=$(grep -rn "$pattern" "$src" --include="*.swift" 2>/dev/null || true)
+        if [[ -n "$matches" ]]; then
+            echo ""
+            echo "  ✗ $msg"
+            while IFS= read -r line; do
+                echo "    ${line#$PROJECT_ROOT/}"
+            done <<< "$matches"
+            found=1
+        fi
+    }
+
+    # Bypassable: a documented external synchronization mechanism may justify these.
     _conc_grep 'nonisolated(unsafe)'     'nonisolated(unsafe) — last resort only: add // concurrent-safe: <reason> documenting the external synchronization mechanism that the compiler cannot see'
     _conc_grep '@unchecked Sendable'     '@unchecked Sendable — last resort only: add // concurrent-safe: <reason> documenting the external synchronization mechanism that the compiler cannot see'
     _conc_grep '@preconcurrency import'  '@preconcurrency import — only for system frameworks that have not adopted Swift Concurrency'
-    _conc_grep 'DispatchQueue\.global('  'DispatchQueue.global — forbidden. Use a named serial queue or actor'
-    _conc_grep '\.sync\s*\{'             '.sync { } — forbidden. Blocking calls cause deadlocks. Use actor isolation'
-    _conc_grep 'DispatchSemaphore'       'DispatchSemaphore — forbidden. Blocks the cooperative thread pool. Use actor isolation'
-    _conc_grep 'NSLock\|os_unfair_lock\|pthread_mutex' 'Lock (NSLock/os_unfair_lock/pthread_mutex) — forbidden. Must never be held across await. Use actor isolation'
-    _conc_grep 'Data(contentsOf:'        'Data(contentsOf:) — forbidden. Synchronous file I/O blocks the calling thread. Use actor-backed persistence'
-    _conc_grep 'String(contentsOf:'      'String(contentsOf:) — forbidden. Synchronous file I/O blocks the calling thread'
-    _conc_grep 'UIImage(contentsOfFile:' 'UIImage(contentsOfFile:) — forbidden. Synchronous file I/O blocks the calling thread'
     _conc_grep 'MainActor\.assumeIsolated' 'MainActor.assumeIsolated — traps at runtime if wrong. Add // concurrent-safe: <invariant> documenting the guarantee'
+    _conc_grep 'NSLock\|os_unfair_lock\|pthread_mutex' 'Lock (NSLock/os_unfair_lock/pthread_mutex) — must never be held across await; add // concurrent-safe: <reason> documenting the synchronization'
+    _conc_grep 'Data(contentsOf:'        'Data(contentsOf:) — synchronous file I/O. Must run off the main actor; add // concurrent-safe: <reason> documenting the queue/actor it runs on'
+    _conc_grep 'String(contentsOf:'      'String(contentsOf:) — synchronous file I/O. Must run off the main actor; add // concurrent-safe: <reason> documenting the queue/actor it runs on'
+    _conc_grep 'UIImage(contentsOfFile:' 'UIImage(contentsOfFile:) — synchronous file I/O. Must run off the main actor; add // concurrent-safe: <reason> documenting the queue/actor it runs on'
     _conc_grep 'captureSession\.startRunning\|captureSession\.stopRunning' 'AVCaptureSession start/stopRunning — must be inside an actor with a custom serial executor. Do not call from @MainActor'
+
+    # Hard-forbidden: no override exists for these.
+    _conc_grep_hard 'DispatchQueue\.global('  'DispatchQueue.global — forbidden. Use a named serial queue or actor'
+    _conc_grep_hard 'DispatchSemaphore'       'DispatchSemaphore — forbidden. Blocks the cooperative thread pool. Use actor isolation'
 
     if [[ $found -eq 1 ]]; then
         echo ""
@@ -823,6 +977,8 @@ do_concurrency_check() {
         echo "  compiler cannot see an external synchronization mechanism"
         echo "  (e.g., a delegate callback known to run on a specific serial"
         echo "  queue). It is not a workaround — restructure the code instead."
+        echo "  Patterns in the hard tier (DispatchQueue.global, DispatchSemaphore)"
+        echo "  have no override — restructure them."
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         return 1
     fi
@@ -830,6 +986,10 @@ do_concurrency_check() {
 }
 
 do_structure_check() {
+    do_override_syntax_check || return 1
+    do_any_check || return 1
+    do_message_bus_check || return 1
+    do_view_state_mutation_check || return 1
     do_mark_spacing_check || return 1
     do_section_marker_check || return 1
     do_handler_suffix_check || return 1
@@ -919,6 +1079,10 @@ do_section_marker_check() {
             }
         done < <(grep -n '' "$file" 2>/dev/null)
     done < <(find "$src" -name "${STATE_BASENAME}*.swift" -type f 2>/dev/null)
+
+    while IFS= read -r line; do
+        violations+="  dash not allowed: ${line#$PROJECT_ROOT/}"$'\n'
+    done < <(grep -rn '// MARK: -' "$PROJECT_ROOT/$SOURCE_DIR" --include="*.swift" 2>/dev/null || true)
 
     if [[ -n "$violations" ]]; then
         echo ""
@@ -1158,6 +1322,10 @@ do_lint() {
     fi
     echo "✓ Lint passed"
 
+    if command -v swiftformat &>/dev/null; then
+        do_format_check || return 1
+    fi
+
     if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
         do_state_check || return 1
         do_concurrency_check || return 1
@@ -1237,9 +1405,27 @@ do_analyze() {
     fi
 }
 
+do_override_audit() {
+    local src="$PROJECT_ROOT/$SOURCE_DIR"
+    local matches
+    matches=$(grep -rn '// lint:allow' "$src" --include="*.swift" 2>/dev/null || true)
+    echo "── lint:allow overrides ──"
+    if [[ -z "$matches" ]]; then
+        echo "  (none)"
+    else
+        while IFS= read -r line; do
+            echo "  ${line#$PROJECT_ROOT/}"
+        done <<< "$matches"
+        echo ""
+        echo "  Review each override — they document deliberate departures from the"
+        echo "  architecture and should be rare and self-justifying."
+    fi
+}
+
 do_audit() {
     do_lint || true
     do_format_check || true
+    do_override_audit || true
 
     if command -v periphery &>/dev/null; then
         do_unused || true
