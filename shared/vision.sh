@@ -4,7 +4,7 @@
 
 _vision_usage() {
     cat <<'EOF'
-Usage: ./build.sh vision <image> --focus "<question>" [--model <id>] [--max-dim N]
+Usage: ./build.sh vision <image> --focus "<question>" [--model <id>] [--max-dim N] [--retries N]
 
 Send an image to a vision model and print its answer as plain text.
 
@@ -12,6 +12,7 @@ Send an image to a vision model and print its answer as plain text.
   --focus "<question>"   REQUIRED. A focused question about the image.
   --model <id>         Override TOOLKIT_VISION_MODEL.
   --max-dim N          Longest-edge cap in px; 0 (default) sends the original at full resolution.
+  --retries N          Retry transient failures (HTTP 5xx/429, empty answer) up to N times (default 3).
 
 Env:
   TOOLKIT_MODEL_API_KEY   Required. Provider API key (never printed or stored here).
@@ -30,12 +31,13 @@ EOF
 }
 
 _do_vision() {
-    local image="" focus="" model="" max_dim=0
+    local image="" focus="" model="" max_dim=0 retries=3
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --focus) focus="${2:-}"; shift 2 ;;
             --model) model="${2:-}"; shift 2 ;;
             --max-dim) max_dim="${2:-0}"; shift 2 ;;
+            --retries) retries="${2:-3}"; shift 2 ;;
             -h|--help) _vision_usage; return 0 ;;
             *)
                 if [[ -z "$image" ]]; then image="$1"; else echo "✗ Unexpected argument: $1" >&2; _vision_usage; return 1; fi
@@ -120,25 +122,55 @@ with open(out_path, "w") as f:
 PY
     [[ -n "$tmp_img" ]] && rm -f "$tmp_img"
 
-    local status
-    status=$(curl -sS -o "$resp_file" -w "%{http_code}" \
-        -X POST "${base_url%/}/chat/completions" \
-        -H "Authorization: Bearer ${TOOLKIT_MODEL_API_KEY}" \
-        -H "Content-Type: application/json" \
-        --data-binary "@$req_file")
+    # Sanitize --retries to a positive integer (default 3).
+    case "$retries" in
+        ''|*[!0-9]*|0) retries=3 ;;
+    esac
 
-    if [[ "$status" != "200" ]]; then
+    local attempt=0 status answer
+    while [[ $attempt -lt $retries ]]; do
+        attempt=$((attempt + 1))
+        status=$(curl -sS -o "$resp_file" -w "%{http_code}" \
+            -X POST "${base_url%/}/chat/completions" \
+            -H "Authorization: Bearer ${TOOLKIT_MODEL_API_KEY}" \
+            -H "Content-Type: application/json" \
+            --data-binary "@$req_file")
+
+        if [[ "$status" == "200" ]]; then
+            if command -v jq >/dev/null 2>&1; then
+                answer=$(jq -r '.choices[0].message.content // .choices[0].text // empty' "$resp_file" 2>/dev/null)
+            else
+                answer=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); c=d.get("choices",[{}])[0].get("message",{}).get("content"); print(c if c else "")' "$resp_file" 2>/dev/null)
+            fi
+            if [[ -n "$answer" ]]; then
+                printf '%s\n' "$answer"
+                rm -f "$req_file" "$resp_file"
+                return 0
+            fi
+            # Empty content → retryable.
+            if [[ $attempt -lt $retries ]]; then
+                echo "⚠ Vision returned an empty answer — retrying ($attempt/$retries)..." >&2
+                sleep 1
+                continue
+            fi
+            echo "✗ Vision returned empty content after $retries attempt(s)." >&2
+            rm -f "$req_file" "$resp_file"
+            return 1
+        fi
+
+        # Transient server errors → retryable.
+        if [[ "$status" == "429" || "$status" =~ ^5 ]] && [[ $attempt -lt $retries ]]; then
+            echo "⚠ Vision API HTTP $status — retrying ($attempt/$retries)..." >&2
+            sleep 1
+            continue
+        fi
+
         echo "✗ Vision API error (HTTP $status):" >&2
         head -c 2000 "$resp_file" >&2; echo "" >&2
         rm -f "$req_file" "$resp_file"
         return 1
-    fi
-
-    if command -v jq >/dev/null 2>&1; then
-        jq -r '.choices[0].message.content // .choices[0].text // .error.message // "✗ no content in response"' "$resp_file"
-    else
-        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("choices",[{}])[0].get("message",{}).get("content") or d.get("error",{}).get("message") or "✗ no content in response")' "$resp_file"
-    fi
+    done
 
     rm -f "$req_file" "$resp_file"
+    return 1
 }
