@@ -32,6 +32,7 @@ fi
 
 source "$SCRIPT_DIR/../shared/build-utils.sh"
 source "$SCRIPT_DIR/../shared/sentry.sh"
+source "$SCRIPT_DIR/../shared/vision.sh"
 source "$SCRIPT_DIR/build-lifecycle.sh"
 source "$SCRIPT_DIR/build-e2e.sh"
 source "$SCRIPT_DIR/build-upload.sh"
@@ -218,6 +219,21 @@ _detect_device() {
     fi
 }
 
+# ── Non-fatal device availability check ─────────────────────────────
+
+# Returns 0 when at least one physical iPhone is connected, 1 otherwise.
+_device_connected() {
+    local devices
+    devices=$(xcrun devicectl list devices 2>/dev/null | grep -v "^Name" | grep -v "^--" | grep "available" || true)
+    [[ -z "$devices" ]] && return 1
+    return 0
+}
+
+# Prints the UDID of the first booted simulator, empty string if none.
+_booted_sim_id() {
+    xcrun simctl list devices booted 2>/dev/null | grep -oE '[A-F0-9-]{36}' | head -1 || true
+}
+
 # ── Mode state ──────────────────────────────────────────────────────
 
 _TARGET_SDK=""
@@ -262,18 +278,27 @@ _set_mode_device_forced() {
 }
 
 _select_target() {
-    local requested="${1:-simulator}"
-    if $_DEVICE_FORCED; then
-        _set_mode_device_forced
-        return
-    fi
+    local requested="${1:-auto}"
     case "$requested" in
+        sim|simulator)
+            _set_mode_sim
+            _validate_sim_target
+            ;;
         iphone|device)
             _set_mode_device_forced
             ;;
+        auto)
+            if _device_connected; then
+                _set_mode_device_forced
+            else
+                echo "ℹ No physical iPhone connected — using simulator."
+                _set_mode_sim
+                _validate_sim_target
+            fi
+            ;;
         *)
-            _set_mode_sim
-            _validate_sim_target
+            echo "✗ Unknown install target '$requested' (use iphone or simulator)."
+            exit 1
             ;;
     esac
 }
@@ -524,17 +549,101 @@ do_install() {
     _detect_project_config
     do_format
     _check_build_tools
-    _select_target "${1:-simulator}"
+    _select_target "${1:-auto}"
     _validate_target
     _guard_not_running
     _do_build build
     _launch_app
 }
 
+do_screenshot() {
+    local name="${1:-}"
+    _check_core_tools
+    local sim_id
+    sim_id=$(_booted_sim_id)
+    if [[ -z "$sim_id" ]]; then
+        echo "✗ No booted simulator. Run: ./build.sh ios install"
+        return 1
+    fi
+    local dir="${PROJECT_ROOT}/build/screenshots"
+    mkdir -p "$dir"
+    local file="turn_$(date +%Y%m%d-%H%M%S).png"
+    [[ -n "$name" ]] && file="${name}.png"
+    xcrun simctl io "$sim_id" screenshot "$dir/$file"
+    echo "✓ Screenshot saved"
+    echo "$(cd "$dir" && pwd)/$file"
+}
+
+do_screenshots_collect() {
+    _detect_project_config
+    _check_core_tools
+    local sim_id
+    sim_id=$(_booted_sim_id)
+    if [[ -z "$sim_id" ]]; then
+        echo "✗ No booted simulator."
+        return 1
+    fi
+    _set_mode_sim
+    local data_dir
+    data_dir=$(xcrun simctl get_app_container "$sim_id" "$BUNDLE_ID" data 2>/dev/null || true)
+    local src="${data_dir}/Library/Application Support/DebugScreenshots"
+    local dest="${PROJECT_ROOT}/build/screenshots"
+    if [[ -z "$data_dir" || ! -d "$src" ]]; then
+        echo "⚠ No scripted screenshots found in the app container."
+        return 0
+    fi
+    mkdir -p "$dest"
+    local count=0
+    for p in "$src"/*.png; do
+        [[ -e "$p" ]] || continue
+        cp "$p" "$dest/"
+        echo "$(cd "$dest" && pwd)/$(basename "$p")"
+        count=$((count + 1))
+    done
+    echo "✓ Collected $count screenshot(s)"
+}
+
+do_see() {
+    local focus=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --focus) focus="${2:-}"; shift 2 ;;
+            *) echo "✗ Unknown argument: $1" >&2; return 1 ;;
+        esac
+    done
+
+    _check_core_tools
+    local sim_id
+    sim_id=$(_booted_sim_id)
+    if [[ -z "$sim_id" ]]; then
+        echo "✗ No booted simulator. Run: ./build.sh ios install"
+        return 1
+    fi
+
+    local dir="${PROJECT_ROOT}/build/screenshots"
+    mkdir -p "$dir"
+    local file="see_$(date +%Y%m%d-%H%M%S).png"
+    xcrun simctl io "$sim_id" screenshot "$dir/$file" >/dev/null
+    local path
+    path="$(cd "$dir" && pwd)/$file"
+    echo "Screenshot: $path"
+    echo ""
+
+    local prompt="$focus"
+    if [[ -z "$prompt" ]]; then
+        prompt="Describe what is currently on screen: what screen or feature is the app showing, and what are the main visible UI elements, from top to bottom?"
+    fi
+
+    if _do_vision "$path" --focus "$prompt"; then
+        echo ""
+        echo "─ For fine detail: ./build.sh ios see --focus \"<focused question about a region or element>\""
+    fi
+}
+
 do_uninstall() {
     _detect_project_config
     _check_core_tools
-    _select_target "${1:-simulator}"
+    _select_target "${1:-auto}"
     if [[ -f "$PID_FILE" ]]; then
         kill "$(cat "$PID_FILE")" 2>/dev/null || true
         rm -rf "$PROJECT_ROOT/.watch"
@@ -559,7 +668,7 @@ do_uninstall() {
 do_watch() {
     _detect_project_config
     _check_build_tools
-    local target="simulator"
+    local target="auto"
     if [[ "${1:-}" == "simulator" || "${1:-}" == "iphone" || "${1:-}" == "device" ]]; then
         target="$1"
         shift
@@ -1388,7 +1497,7 @@ do_unused() {
 }
 
 do_analyze() {
-    _select_target "${1:-simulator}"
+    _select_target "${1:-auto}"
     _validate_target
     _ensure_project
     local log
@@ -1701,7 +1810,7 @@ _ios_logs() {
         echo "✗ Logs disabled. Set TOOLKIT_LOGS_ENABLED=true in build.properties."
         return 1
     fi
-    _select_target "${1:-simulator}"
+    _select_target "${1:-auto}"
     local cat_filter=""
     local level_filter=""
     local cmd=""
@@ -1831,7 +1940,7 @@ _ios_debug() {
         echo "✗ Logs disabled. Set TOOLKIT_LOGS_ENABLED=true in build.properties."
         return 1
     fi
-    _select_target "${1:-simulator}"
+    _select_target "${1:-auto}"
     case "${1:-}" in
         iphone|device|simulator) shift ;;
     esac
@@ -1851,18 +1960,30 @@ _ios_debug() {
         script_names=""
     fi
     local debug_dir="${TOOLKIT_DEBUG_SCRIPT_DIR:-debug}"
-    if [[ -n "$script_names" && -d "$PROJECT_ROOT/$debug_dir" ]]; then
-        cat > "$PROJECT_ROOT/$debug_dir/config.swift" << EOF
-#if DEBUG
-enum DebugScriptConfig {
-    static let names = "$script_names"
-}
-#endif
-EOF
+    if [[ -n "$script_names" ]]; then
         _clear_scriptor_marker
+        # Simulator: inject names at launch via SIMCTL_CHILD_ so config.swift stays untouched
+        # and subsequent script runs reuse the incremental build (no rebuild).
+        export SIMCTL_CHILD_TURN_DEBUG_SCRIPT_NAMES="$script_names"
     fi
     case "$_TARGET_SDK" in
         iphoneos)
+            # Device: devicectl can't inject env, so compile the names in.
+            if [[ -n "$script_names" && -d "$PROJECT_ROOT/$debug_dir" ]]; then
+                cat > "$PROJECT_ROOT/$debug_dir/config.swift" << EOF
+#if DEBUG
+import Foundation
+
+enum DebugScriptConfig {
+    static let compileTimeNames = "$script_names"
+
+    static var names: String {
+        ProcessInfo.processInfo.environment["TURN_DEBUG_SCRIPT_NAMES"] ?? compileTimeNames
+    }
+}
+#endif
+EOF
+            fi
             _require_cmd idevicesyslog "Install with: brew install libimobiledevice"
             local fifo syslog_pid pipe_pid reader_pid
             fifo=$(mktemp -u)
@@ -1985,9 +2106,12 @@ Usage: ./build.sh [device] [--device <name|udid>] <command> [<args>]
     configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
     build              Lint → format → incremental build
     clean              Clean build artifacts
-    install [iphone]   Build + launch (default simulator; pass 'iphone' for device)
+    install [iphone|simulator]   Build + launch (no arg: prefer a connected phone, else simulator)
     uninstall [iphone] Stop watcher + app + uninstall (default simulator; 'iphone' for device)
     watch [iphone] [mode]  Build + launch + auto-redeploy (mode: swift|build, default: swift)
+    screenshot [name]  Capture the booted simulator's screen to ios/build/screenshots/ (no build/launch)
+    screenshots collect  Copy scripted in-app screenshots out of the sim container into ios/build/screenshots/
+    see [--focus "<q>"]  Capture the simulator screen and describe it with the vision model (--focus optional)
     test [filter] [timeout]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT)
     lint               Run SwiftLint on all Swift sources
     format             Auto-format all Swift sources with SwiftFormat
@@ -2016,8 +2140,9 @@ Options:
                                Example: export IOS_DEVICE="iPhone 15"
 
 Prefix with 'device' to force physical device target (uses network
-or USB). Without 'device', install/uninstall/watch default to the
-simulator; pass 'iphone' to target the physical device.
+or USB). Without 'device', install/uninstall/watch with no target
+prefer a connected physical phone and fall back to the simulator;
+pass 'iphone' to force the device or 'simulator' to force the simulator.
 EOF
 }
 
@@ -2049,7 +2174,6 @@ _dispatch() {
 
     if [[ -z "$_DEVICE_SELECTOR" && -n "${IOS_DEVICE:-}" ]]; then
         _DEVICE_SELECTOR="$IOS_DEVICE"
-        _DEVICE_FORCED=true
     fi
 
     _detect_project_config
@@ -2084,6 +2208,9 @@ _dispatch() {
         build)    do_build ;;
         clean)    do_clean ;;
         install)  shift; do_install "$@" ;;
+        screenshot) shift; do_screenshot "$@" ;;
+        screenshots) shift; do_screenshots_collect "$@" ;;
+        see) shift; do_see "$@" ;;
         uninstall) shift; do_uninstall "$@" ;;
         watch)    shift; do_watch "$@" ;;
         test)     shift; do_test "$@" ;;
