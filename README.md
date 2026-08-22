@@ -8,7 +8,7 @@ generate a thin `build.sh` entry via `./build.sh`-style scaffolding.
 
 | Folder | Status | Use |
 |---|---|---|---|
-| `ios/` | ready | iOS app builds, lint gates, install/watch/test, logs/debug, e2e, TestFlight upload, Sentry queries |
+| `ios/` | ready | iOS app builds, lint gates, install/watch/test, logs/debug, e2e, TestFlight upload, Sentry queries, screenshots/vision |
 | `server/` | ready | Go server builds, start/stop/watch, lint/test, deploy/rollback (Fly.io), migrations, Sentry queries |
 | `android/` | planned | — |
 | `web/` | planned | — |
@@ -32,3 +32,23 @@ per-project via the platform's `./build.sh configure`.
 
 - `ios/config/README.md` — full iOS toolkit reference
 - `server/config/README.md` — full server toolkit reference
+
+## Vision (shared)
+
+`vision <image> --focus "<question>"` asks a vision model about an image and prints the
+answer as text. It lives in `shared/vision.sh` and is wired at the project's root
+`build.sh`, speaking an OpenAI-compatible `chat/completions` API.
+
+- `--focus` is required — omitting it prints prompting guidance.
+- Images are sent at full resolution by default; `--max-dim N` downsizes on demand.
+
+Environment:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `TOOLKIT_MODEL_API_KEY` | — (required) | Provider API key |
+| `TOOLKIT_MODEL_BASE_URL` | `https://opencode.ai/zen/go/v1` | Base URL; `/chat/completions` is appended |
+| `TOOLKIT_VISION_MODEL` | `deepseek-v4-flash-vision-exp` | Model name for vision queries |
+
+The iOS toolkit adds a `see` command that composes simulator screenshot capture with
+`vision` (see `ios/config/README.md`).

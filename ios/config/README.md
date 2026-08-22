@@ -89,12 +89,32 @@ do_mything() { echo "custom"; }
 _dispatch "$@"
 ```
 
+## Screenshots & vision
+
+Capture and inspect the app's UI on the simulator:
+
+- `screenshot [name]` — capture the booted simulator's screen to `build/screenshots/`
+  (no build/launch); prints the absolute path last.
+- `screenshots collect` — copy in-app debug captures (`DebugScreenshot.save`) out of
+  the app container into `build/screenshots/`, preserving names.
+- `see [--focus "<q>"]` — capture the simulator screen and describe it with a vision
+  model; `--focus` optional (defaults to a broad description plus a footer nudging
+  toward focused follow-ups).
+
+`see` composes the shared `vision` command (see the monorepo `README.md`), which reads
+`TOOLKIT_MODEL_API_KEY` / `TOOLKIT_MODEL_BASE_URL` / `TOOLKIT_VISION_MODEL` from the
+environment. Images are sent at full resolution by default.
+
 ## Commands
 
-`setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [iphone]` · `uninstall [iphone]` · `watch [iphone] [mode]` ·
+`setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [iphone|simulator]` · `uninstall [iphone]` · `watch [iphone] [mode]` ·
 `test [filter] [timeout]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
-`logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level]` · `e2e` · `e2e-run` ·
+`logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level] [--script <names>]` · `e2e` · `e2e-run` ·
+`screenshot [name]` · `screenshots collect` · `see [--focus <q>]` ·
 `upload [--force] <text>` · `sentry <cmd>`
 
-`device` prefix or `--device <name|udid>` targets a physical device; otherwise the
-simulator is used. See `./build.sh` (no args) for full usage.
+`device` prefix or `--device <name|udid>` targets a specific physical device.
+`install`, `uninstall`, and `watch` take `iphone` or `simulator` as an explicit target;
+with no target they prefer a connected phone and fall back to the simulator.
+`IOS_DEVICE=<name|udid>` selects which connected iPhone to use when several are present
+(a preference, not a force). See `./build.sh` (no args) for full usage.
