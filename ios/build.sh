@@ -358,7 +358,7 @@ _ensure_project() {
         return
     fi
     local newer_source_dir
-    newer_source_dir=$(find "$PROJECT_ROOT/$SOURCE_DIR" "$PROJECT_ROOT/${PROJECT_NAME}Tests" "$PROJECT_ROOT/${PROJECT_NAME}UITests" -type d -newer "$project_file" -print -quit 2>/dev/null || true)
+    newer_source_dir=$(find "$PROJECT_ROOT/$SOURCE_DIR" "$PROJECT_ROOT/${PROJECT_NAME}Tests" "$PROJECT_ROOT/${PROJECT_NAME}UITests" "$PROJECT_ROOT/debug" -type d -newer "$project_file" -print -quit 2>/dev/null || true)
     if [[ "$PROJECT_ROOT/project.yml" -nt "$project_file" || -n "$newer_source_dir" ]]; then
         _require_cmd xcodegen "Install with: brew install xcodegen"
         (cd "$PROJECT_ROOT" && xcodegen generate)
