@@ -37,13 +37,13 @@ _fly_status() {
     echo ""
     echo "── App: $FLY_APP ─────────────────────────────────────────────────────────"
     local app_json
-    app_json=$(fly status --app "$FLY_APP" --json 2>/dev/null)
+    app_json=$(fly status --app "$FLY_APP" --json 2>/dev/null || true)
     local hostname
     hostname=$(echo "$app_json" | jq -r '.Hostname // "?"' 2>/dev/null)
     echo "  URL:        https://$hostname"
 
     local latest_release
-    latest_release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first // empty | "v\(.Version) (\(.CreatedAt[:19] | sub("T";" ")))"' 2>/dev/null)
+    latest_release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first // empty | "v\(.Version) (\(.CreatedAt[:19] | sub("T";" ")))"' 2>/dev/null || true)
     echo "  Release:    $latest_release"
 
     echo "$app_json" | jq -r '.Machines[]? | "\(.state // "?")|\(.region // "?")|\(.id[:12])"' | while IFS='|' read -r state region mid; do
@@ -59,7 +59,7 @@ _fly_status() {
     echo ""
     echo "── Database: turn-pg ─────────────────────────────────────────────────────"
     local db_json
-    db_json=$(fly mpg status "$FLY_DB_CLUSTER" --json 2>/dev/null)
+    db_json=$(fly mpg status "$FLY_DB_CLUSTER" --json 2>/dev/null || true)
     echo "$db_json" | jq -r '
         .data |
         "\(.id // "?")|\(.status // "?")|\(.plan // "?")|\(.disk // "?")|\(.region // "?")|\(.replicas // "?")|\(.ip_assignments.direct // "?")"
@@ -87,7 +87,7 @@ _fly_status() {
     echo ""
     echo "── Storage ───────────────────────────────────────────────────────────────"
     local storage_list
-    storage_list=$(fly ext storage list 2>/dev/null)
+    storage_list=$(fly ext storage list 2>/dev/null || true)
     if echo "$storage_list" | grep -q 'NAME'; then
         while IFS= read -r line; do
             [[ -z "$line" ]] && continue
@@ -95,7 +95,7 @@ _fly_status() {
             bname=$(echo "$line" | awk -F'│' '{gsub(/ /, "", $1); print $1}')
             [[ -z "$bname" ]] && continue
             local bstatus
-            bstatus=$(fly ext storage status "$bname" 2>/dev/null | grep '│' | awk -F'│' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); key=$1; val=$2; printf "%s=%s ", key, val}')
+            bstatus=$(fly ext storage status "$bname" 2>/dev/null | grep '│' | awk -F'│' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); key=$1; val=$2; printf "%s=%s ", key, val}' || true)
             echo "  ${GREEN}✓${RESET} $bname  $bstatus"
         done < <(echo "$storage_list" | tail -n +2)
     else
@@ -147,7 +147,7 @@ _fly_status() {
     echo ""
     echo "── Metrics ───────────────────────────────────────────────────────────────"
     local metrics_token
-    metrics_token=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[] | select(.Name == "METRICS_TOKEN") | .Value // empty' 2>/dev/null)
+    metrics_token=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[] | select(.Name == "METRICS_TOKEN") | .Value // empty' 2>/dev/null || true)
     if [[ -n "$metrics_token" ]]; then
         curl -s --max-time 5 "https://${FLY_APP}.fly.dev/metrics?token=${metrics_token}" 2>/dev/null | head -10
     else
@@ -389,7 +389,7 @@ _fly_deploy() {
         echo "  → would snapshot DB ($FLY_DB_CLUSTER)"
         backup="dry-run-skip"
     else
-        backup=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'max_by(.start) | "\(.id)|\(.start)"' 2>/dev/null)
+        backup=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'max_by(.start) | "\(.id)|\(.start)"' 2>/dev/null || true)
         if [[ -n "$backup" ]]; then
             local backup_id backup_start backup_age
             backup_id="${backup%%|*}"
@@ -415,7 +415,7 @@ _fly_deploy() {
                 return 1
             fi
             sleep 3
-            backup=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'max_by(.start).id // ""' 2>/dev/null)
+            backup=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'max_by(.start).id // ""' 2>/dev/null || true)
             if [[ -z "$backup" ]]; then
                 echo "  ✗ could not capture backup ID — full log: $_backup_out"
                 tail -n 10 "$_backup_out" | sed 's/^/    /'
@@ -476,7 +476,7 @@ _fly_deploy() {
                 echo "  → would sync ${#secrets_args[@]} secrets to Fly"
             elif fly secrets set --app "$FLY_APP" "${secrets_args[@]}" > "$_secrets_out" 2>&1; then
                 echo "  ✓ secrets synced to Fly"
-                fly secrets list --app "$FLY_APP" --json 2>/dev/null > "$_secrets_cache"
+                fly secrets list --app "$FLY_APP" --json 2>/dev/null > "$_secrets_cache" || true
             else
                 echo "  ⚠ secrets sync failed — deploy will proceed with existing secrets"
                 echo "    Full log: $_secrets_out"
@@ -506,7 +506,7 @@ _fly_deploy() {
     if [[ $DRY_RUN -eq 1 ]]; then
         echo "  → would deploy with strategy=$DEPLOY_STRATEGY"
         local release
-        release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first.Version // "?"' 2>/dev/null)
+        release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first.Version // "?"' 2>/dev/null || true)
     else
         echo "  → building (60-90s)..."
         _sync_locale
@@ -523,7 +523,7 @@ _fly_deploy() {
             return 1
         fi
         local release
-        release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first.Version // "?"' 2>/dev/null)
+        release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first.Version // "?"' 2>/dev/null || true)
         echo "  ✓ deployed as release v$release"
     fi
     echo "  ⏱  $((SECONDS - step_start))s"
@@ -616,7 +616,7 @@ _fly_deploy() {
 _fly_snapshots() {
     echo "=== DB Backups ==="
     local backup_output
-    backup_output=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'sort_by(.start) | reverse | .[] | "  \(.id // "?")  \(.start // "unknown")  type=\(.type // "?")  status=\(.status // "?")"' 2>/dev/null)
+    backup_output=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'sort_by(.start) | reverse | .[] | "  \(.id // "?")  \(.start // "unknown")  type=\(.type // "?")  status=\(.status // "?")"' 2>/dev/null || true)
     if [[ -z "$backup_output" ]]; then
         echo "  No backups found."
     else
@@ -742,7 +742,7 @@ _fly_rollback() {
     fi
     echo "  → restoring..."
     local restore_out
-    restore_out=$(fly mpg restore "$FLY_DB_CLUSTER" --backup-id "$backup_id" 2>&1)
+    restore_out=$(fly mpg restore "$FLY_DB_CLUSTER" --backup-id "$backup_id" 2>&1 || true)
     local new_cluster
     new_cluster=$(echo "$restore_out" | grep -o 'Cluster ID: [^ ]*' | awk '{print $NF}')
     if [[ -z "$new_cluster" ]]; then
@@ -755,7 +755,7 @@ _fly_rollback() {
     local waited=0
     while [[ $waited -lt 1800 ]]; do
         local cs
-        cs=$(fly mpg status "$new_cluster" --json 2>/dev/null | jq -r '.data.status // "?"' 2>/dev/null)
+        cs=$(fly mpg status "$new_cluster" --json 2>/dev/null | jq -r '.data.status // "?"' 2>/dev/null || true)
         if [[ "$cs" == "ready" ]]; then
             break
         fi
@@ -769,7 +769,7 @@ _fly_rollback() {
     fi
 
     local creds
-    creds=$(fly mpg status "$new_cluster" --json 2>/dev/null)
+    creds=$(fly mpg status "$new_cluster" --json 2>/dev/null || true)
     local db_url
     db_url=$(echo "$creds" | jq -r '.credentials.pgbouncer_uri + "?sslmode=disable"' 2>/dev/null)
     if [[ -z "$db_url" ]]; then
@@ -789,7 +789,10 @@ _fly_rollback() {
         echo "  ⏱  $((SECONDS - step_start))s"
     else
     echo "  → updating secret..."
-    fly secrets set --app "$FLY_APP" DATABASE_URL="$db_url"
+    if ! fly secrets set --app "$FLY_APP" DATABASE_URL="$db_url"; then
+        echo "  ✗ could not update DATABASE_URL secret on Fly"
+        return 1
+    fi
     echo "  ✓ DATABASE_URL updated"
     echo "  ⏱  $((SECONDS - step_start))s"
     fi
@@ -804,7 +807,7 @@ _fly_rollback() {
         return 1
     fi
     local image
-    image=$(fly releases --app "$FLY_APP" --image --json 2>/dev/null | jq -r --arg ver "$release_ver" 'map(select(.Version == ($ver | tonumber))) | first.ImageRef // ""' 2>/dev/null)
+    image=$(fly releases --app "$FLY_APP" --image --json 2>/dev/null | jq -r --arg ver "$release_ver" 'map(select(.Version == ($ver | tonumber))) | first.ImageRef // ""' 2>/dev/null || true)
     if [[ -z "$image" ]]; then
         echo "  ✗ could not find image for release v$release_ver"
         return 1
@@ -902,12 +905,12 @@ _fly_ci_setup() {
     echo ""
     echo "=== Revoke old deploy tokens ==="
     local old_tokens
-    old_tokens=$(fly tokens list -a "$FLY_APP" 2>/dev/null | awk -F'│' -v name="github-actions-deploy" '$0 ~ name {gsub(/ /, "", $1); print $1}')
+    old_tokens=$(fly tokens list -a "$FLY_APP" 2>/dev/null | awk -F'│' -v name="github-actions-deploy" '$0 ~ name {gsub(/ /, "", $1); print $1}' || true)
     if [[ -n "$old_tokens" ]]; then
         while read -r tid; do
             [[ -z "$tid" ]] && continue
             echo "  Revoking $tid..."
-            fly tokens revoke "$tid" 2>&1
+            fly tokens revoke "$tid" 2>&1 || true
         done <<< "$old_tokens"
     else
         echo "  None found"
@@ -916,7 +919,7 @@ _fly_ci_setup() {
     echo ""
     echo "=== Create Fly deploy token ==="
     local token_json
-    token_json=$(fly tokens create deploy --app "$FLY_APP" --name "github-actions-deploy" --json 2>&1)
+    token_json=$(fly tokens create deploy --app "$FLY_APP" --name "github-actions-deploy" --json 2>&1 || true)
     local token
     token=$(echo "$token_json" | jq -r '.token' 2>/dev/null)
     if [[ -z "$token" ]]; then
@@ -946,12 +949,12 @@ _fly_ci_setup() {
 _fly_logs() {
     if [[ "${1:-}" == "tail" ]]; then
         local lines="${2:-10}"
-        fly logs --app "$FLY_APP" --no-tail 2>&1 | tail -n "$lines"
+        fly logs --app "$FLY_APP" --no-tail 2>&1 | tail -n "$lines" || { echo "✗ fly logs failed"; return 1; }
         echo "--- live ---"
-        fly logs --app "$FLY_APP" 2>&1 | tail -n 0 -f
+        fly logs --app "$FLY_APP" 2>&1 | tail -n 0 -f || { echo "✗ fly logs stream ended with an error"; return 1; }
     else
         local lines="${1:-10}"
-        fly logs --app "$FLY_APP" --no-tail 2>&1 | tail -n "$lines"
+        fly logs --app "$FLY_APP" --no-tail 2>&1 | tail -n "$lines" || { echo "✗ fly logs failed"; return 1; }
     fi
 }
 
@@ -987,9 +990,9 @@ _fly_deployments() {
 }
 
 _fly_releases() {
-    fly releases --app "$FLY_APP"
+    fly releases --app "$FLY_APP" || { echo "✗ fly releases failed — check Fly.io authentication with: fly auth login"; return 1; }
 }
 
 _fly_machines() {
-    fly machine list --app "$FLY_APP"
+    fly machine list --app "$FLY_APP" || { echo "✗ fly machine list failed — check Fly.io authentication with: fly auth login"; return 1; }
 }
