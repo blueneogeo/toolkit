@@ -201,6 +201,13 @@ _pre_deploy_check() {
         return 1
     fi
 
+    echo "  → checking Fly.io authentication..."
+    if _fly_auth_check; then
+        echo "  ✓ Fly.io authenticated"
+    else
+        failed=1
+    fi
+
     if ! git -C "$PROJECT_ROOT" diff-index --quiet HEAD --; then
         echo "  ✗ uncommitted changes — commit or stash before deploying"
         echo "    $(git -C "$PROJECT_ROOT" diff-index --name-status HEAD -- | head -5)"
@@ -230,6 +237,21 @@ _pre_deploy_check() {
     if [[ $failed -ne 0 ]]; then
         return 1
     fi
+}
+
+# Verifies the fly CLI is installed and authenticated. Live commands call
+# this up front so fly failures surface as clear messages instead of dying
+# silently inside suppressed subcommands.
+_fly_auth_check() {
+    if ! command -v fly &>/dev/null; then
+        echo "  ✗ fly CLI not found — install it with: brew install flyctl"
+        return 1
+    fi
+    if ! fly auth whoami &>/dev/null; then
+        echo "  ✗ Fly.io is not authenticated — run: fly auth login"
+        return 1
+    fi
+    return 0
 }
 
 _cluster_healthy() {
@@ -387,11 +409,16 @@ _fly_deploy() {
         if [[ -z "$backup" ]]; then
             local _backup_out="$PROJECT_ROOT/.watch/backup.log"
             mkdir -p "$(dirname "$_backup_out")"
-            fly mpg backup create "$FLY_DB_CLUSTER" --type incr > "$_backup_out" 2>&1
+            if ! fly mpg backup create "$FLY_DB_CLUSTER" --type incr > "$_backup_out" 2>&1; then
+                echo "  ✗ database backup failed — full log: $_backup_out"
+                tail -n 10 "$_backup_out" | sed 's/^/    /'
+                return 1
+            fi
             sleep 3
             backup=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'max_by(.start).id // ""' 2>/dev/null)
             if [[ -z "$backup" ]]; then
-                echo "  ✗ could not capture backup ID"
+                echo "  ✗ could not capture backup ID — full log: $_backup_out"
+                tail -n 10 "$_backup_out" | sed 's/^/    /'
                 return 1
             fi
             echo "  ✓ backup created: $backup"
@@ -610,6 +637,12 @@ _fly_rollback() {
         echo "=== Rollback (dry-run) ==="
     else
         echo "=== Rollback ==="
+    fi
+
+    if ! _fly_auth_check; then
+        echo ""
+        echo "✗ rollback aborted — fix issues above and retry"
+        return 1
     fi
 
     # ── Step 1: Pick deploy point ─────────────────────────────────
@@ -842,7 +875,7 @@ _fly_rollback() {
 
 _fly_ci_setup() {
     echo "=== Fly.io ==="
-    if ! fly auth status &>/dev/null; then
+    if ! fly auth whoami &>/dev/null; then
         echo "Not logged into Fly.io. Run: fly auth login"
         return 1
     fi
