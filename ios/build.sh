@@ -640,6 +640,323 @@ do_see() {
     fi
 }
 
+# ── UI driving (baguette) ───────────────────────────────────────────
+
+_ui_usage() {
+    cat <<'EOF'
+Usage: ./build.sh [device] ios ui <command> [<args>]
+
+  Drive and inspect the booted simulator's UI (simulator only).
+  Interactions auto-capture a screenshot afterwards; the path is printed last.
+
+    tap <x> <y>        Tap at device points (402x874 on iPhone 17 Pro)
+    tap --id <id>      Tap the element with this accessibility identifier
+    tap --label <txt>  Tap the first element whose accessibility label matches
+    swipe <x1> <y1> <x2> <y2>
+                       Drag from one point to another
+    swipe <dir>        Full-screen swipe: up | down | left | right
+    type <text>        Type into the currently focused field
+    press <button>     Press a hardware button: home | lock
+    describe [name]    Print the accessibility tree (role | label | id | frame)
+                       and save it to ios/build/screenshots/<name>-ui.txt
+
+Options:
+    --no-shot          Skip the automatic screenshot after the action
+    --delay <ms>       Settle time before the screenshot (default: 700)
+    --device, -d <name|udid>
+                       Target a specific simulator by name substring or UDID.
+                       Defaults to the booted simulator.
+
+Examples:
+    ./build.sh ios ui tap --id record-primary-button
+    ./build.sh ios ui swipe up                        # scroll the feed
+    ./build.sh ios ui type "Family calls"
+    ./build.sh ios ui describe feed
+EOF
+}
+
+_ui_require_baguette() {
+    if ! command -v baguette &>/dev/null; then
+        echo "✗ baguette not found. Install it with: brew install tddworks/tap/baguette"
+        return 1
+    fi
+}
+
+_ui_sim_id() {
+    local sim_id
+    sim_id=$(_booted_sim_id)
+    if [[ -z "$sim_id" ]]; then
+        echo "✗ No booted simulator. Run: ./build.sh ios install"
+        return 1
+    fi
+    echo "$sim_id"
+}
+
+# Prints "W H" in device points for the simulator, cached per UDID.
+_ui_screen_size() {
+    local sim_id="$1"
+    local cache_dir="${PROJECT_ROOT}/build/ui-cache"
+    local cache_file="${cache_dir}/screen-${sim_id}"
+    if [[ -f "$cache_file" ]]; then
+        cat "$cache_file"
+        return 0
+    fi
+    local size
+    size=$(baguette describe-ui --udid "$sim_id" 2>/dev/null | python3 -c '
+import json, sys
+
+try:
+    frame = json.load(sys.stdin)["frame"]
+    print(int(round(frame["width"])), int(round(frame["height"])))
+except Exception:
+    sys.exit(1)
+') || {
+        echo "✗ Could not read the simulator screen size (baguette describe-ui failed)."
+        return 1
+    }
+    mkdir -p "$cache_dir"
+    echo "$size" > "$cache_file"
+    echo "$size"
+}
+
+_ui_ax_format() {
+    python3 -c '
+import json, sys
+
+lines = []
+
+def walk(node, depth):
+    role = node.get("role") or ""
+    label = node.get("label") or ""
+    ident = node.get("identifier") or ""
+    frame = node.get("frame") or {}
+    parts = [role]
+    if label:
+        parts.append(repr(label))
+    if ident:
+        parts.append("id=" + ident)
+    parts.append("x={x:g} y={y:g} w={w:g} h={h:g}".format(
+        x=frame.get("x", 0), y=frame.get("y", 0),
+        w=frame.get("width", 0), h=frame.get("height", 0)))
+    lines.append("  " * depth + " | ".join(parts))
+    for child in node.get("children", []):
+        walk(child, depth + 1)
+
+walk(json.load(sys.stdin), 0)
+print("\n".join(lines))
+'
+}
+
+# Prints "cx cy" for the element matching --id/--label; exits 3 when not found.
+_ui_find_element() {
+    local sim_id="$1" mode="$2" value="$3"
+    baguette describe-ui --udid "$sim_id" 2>/dev/null | MODE="$mode" VALUE="$value" python3 -c '
+import json, os, sys
+
+mode = os.environ["MODE"]
+value = os.environ["VALUE"]
+exact, fuzzy = [], []
+
+def walk(node):
+    if mode == "id":
+        if node.get("identifier") == value:
+            exact.append(node)
+    else:
+        label = node.get("label") or ""
+        if label.lower() == value.lower():
+            exact.append(node)
+        elif label and value.lower() in label.lower():
+            fuzzy.append(node)
+    for child in node.get("children", []):
+        walk(child)
+
+walk(json.load(sys.stdin))
+matches = exact or fuzzy
+if not matches:
+    sys.exit(3)
+if len(matches) > 1:
+    print("⚠ %d elements match; using the first" % len(matches), file=sys.stderr)
+frame = matches[0].get("frame", {})
+print("%g %g" % (frame.get("x", 0) + frame.get("width", 0) / 2,
+                 frame.get("y", 0) + frame.get("height", 0) / 2))
+'
+}
+
+_ui_shot() {
+    local sim_id="$1" verb="$2"
+    local dir="${PROJECT_ROOT}/build/screenshots"
+    mkdir -p "$dir"
+    local file="ui_${verb}_$(date +%H%M%S).png"
+    xcrun simctl io "$sim_id" screenshot "$dir/$file" >/dev/null
+    echo "$(cd "$dir" && pwd)/$file"
+}
+
+_ui_is_number() {
+    [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+# Runs a baguette action and validates its ok JSON.
+_ui_bag_run() {
+    local verb="$1"
+    shift
+    local out
+    if ! out=$(baguette "$@" 2>/dev/null); then
+        echo "✗ baguette $verb failed."
+        return 1
+    fi
+    if ! echo "$out" | grep -q '"ok":true'; then
+        echo "✗ baguette $verb rejected: $out"
+        return 1
+    fi
+}
+
+do_ui() {
+    if [[ -z "${1:-}" || "${1:-}" == "help" || "${1:-}" == "--help" ]]; then
+        _ui_usage
+        return 0
+    fi
+
+    local sub="$1"
+    shift
+
+    _check_core_tools
+    _ui_require_baguette || return 1
+
+    local no_shot=false delay_ms=700
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-shot)
+                no_shot=true
+                shift
+                ;;
+            --delay)
+                if [[ -z "${2:-}" ]]; then
+                    echo "✗ --delay requires milliseconds"
+                    return 1
+                fi
+                delay_ms="$2"
+                shift 2
+                ;;
+            --delay=*)
+                delay_ms="${1#*=}"
+                shift
+                ;;
+            *)
+                args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    local sim_id
+    sim_id=$(_ui_sim_id) || return 1
+
+    if [[ "$sub" == "describe" ]]; then
+        local name="${args[0]:-describe}"
+        name="${name//\//_}"
+        local text
+        text=$(baguette describe-ui --udid "$sim_id" 2>/dev/null | _ui_ax_format)
+        if [[ -z "$text" ]]; then
+            echo "✗ Could not read the accessibility tree."
+            return 1
+        fi
+        echo "$text"
+        local dir="${PROJECT_ROOT}/build/screenshots"
+        mkdir -p "$dir"
+        printf '%s\n' "$text" > "${dir}/${name}-ui.txt"
+        echo "✓ Tree saved"
+        echo "$(cd "$dir" && pwd)/${name}-ui.txt"
+        return 0
+    fi
+
+    case "$sub" in
+        tap|swipe|type|press) ;;
+        *)
+            echo "✗ Unknown ui command: $sub"
+            echo ""
+            _ui_usage
+            return 1
+            ;;
+    esac
+
+    local size w h
+    size=$(_ui_screen_size "$sim_id") || return 1
+    read -r w h <<<"$size"
+
+    local x1="" y1="" x2="" y2=""
+    case "$sub" in
+        tap)
+            if [[ "${args[0]:-}" == "--id" || "${args[0]:-}" == "--label" ]]; then
+                local mode="${args[0]#--}"
+                local value="${args[1]:-}"
+                if [[ -z "$value" ]]; then
+                    echo "✗ tap $mode requires a value"
+                    return 1
+                fi
+                local center
+                center=$(_ui_find_element "$sim_id" "$mode" "$value") || {
+                    echo "✗ No element with $mode '$value' on screen."
+                    return 1
+                }
+                read -r x1 y1 <<<"$center"
+            else
+                if [[ ${#args[@]} -ne 2 ]] || ! _ui_is_number "${args[0]:-}" || ! _ui_is_number "${args[1]:-}"; then
+                    echo "✗ tap expects <x> <y> or --id <id> / --label <text>"
+                    return 1
+                fi
+                x1="${args[0]}"
+                y1="${args[1]}"
+            fi
+            if awk -v x="$x1" -v y="$y1" -v w="$w" -v h="$h" 'BEGIN { exit !(x < 0 || x > w || y < 0 || y > h) }'; then
+                echo "✗ Tap point ($x1, $y1) is outside the screen (${w}×${h})."
+                return 1
+            fi
+            _ui_bag_run tap tap --udid "$sim_id" --x "$x1" --y "$y1" --width "$w" --height "$h" || return 1
+            ;;
+        swipe)
+            if [[ ${#args[@]} -eq 1 && "${args[0]}" =~ ^(up|down|left|right)$ ]]; then
+                case "${args[0]}" in
+                    up)    read -r x1 y1 x2 y2 <<<"$(awk -v w="$w" -v h="$h" 'BEGIN { printf "%d %d %d %d", w/2, h*0.70, w/2, h*0.25 }')" ;;
+                    down)  read -r x1 y1 x2 y2 <<<"$(awk -v w="$w" -v h="$h" 'BEGIN { printf "%d %d %d %d", w/2, h*0.25, w/2, h*0.70 }')" ;;
+                    left)  read -r x1 y1 x2 y2 <<<"$(awk -v w="$w" -v h="$h" 'BEGIN { printf "%d %d %d %d", w*0.80, h/2, w*0.15, h/2 }')" ;;
+                    right) read -r x1 y1 x2 y2 <<<"$(awk -v w="$w" -v h="$h" 'BEGIN { printf "%d %d %d %d", w*0.15, h/2, w*0.80, h/2 }')" ;;
+                esac
+            elif [[ ${#args[@]} -eq 4 ]] && _ui_is_number "${args[0]}" && _ui_is_number "${args[1]}" && _ui_is_number "${args[2]}" && _ui_is_number "${args[3]}"; then
+                x1="${args[0]}"
+                y1="${args[1]}"
+                x2="${args[2]}"
+                y2="${args[3]}"
+            else
+                echo "✗ swipe expects <x1> <y1> <x2> <y2> or a direction (up|down|left|right)"
+                return 1
+            fi
+            _ui_bag_run swipe swipe --udid "$sim_id" --start-x "$x1" --start-y "$y1" --end-x "$x2" --end-y "$y2" --width "$w" --height "$h" || return 1
+            ;;
+        type)
+            if [[ ${#args[@]} -eq 0 ]]; then
+                echo "✗ type expects text, e.g. ./build.sh ios ui type \"hello\""
+                return 1
+            fi
+            _ui_bag_run type type --udid "$sim_id" --text "${args[*]}" || return 1
+            ;;
+        press)
+            local button="${args[0]:-}"
+            if [[ ! "$button" =~ ^(home|lock)$ ]]; then
+                echo "✗ press expects a button: home | lock"
+                return 1
+            fi
+            _ui_bag_run press press --udid "$sim_id" --button "$button" || return 1
+            ;;
+    esac
+
+    echo "✓ ${sub} sent"
+    if ! $no_shot; then
+        sleep "$(awk -v ms="$delay_ms" 'BEGIN { print ms / 1000 }')"
+        _ui_shot "$sim_id" "$sub"
+    fi
+}
+
 do_uninstall() {
     _detect_project_config
     _check_core_tools
@@ -2112,6 +2429,8 @@ Usage: ./build.sh [device] [--device <name|udid>] <command> [<args>]
     screenshot [name]  Capture the booted simulator's screen to ios/build/screenshots/ (no build/launch)
     screenshots collect  Copy scripted in-app screenshots out of the sim container into ios/build/screenshots/
     see [--focus "<q>"]  Capture the simulator screen and describe it with the vision model (--focus optional)
+    ui <command>       Drive the simulator UI (baguette): tap | swipe | type | press | describe
+                       ('./build.sh ios ui' shows the full help)
     test [filter] [timeout]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT)
     lint               Run SwiftLint on all Swift sources
     format             Auto-format all Swift sources with SwiftFormat
@@ -2201,6 +2520,7 @@ _dispatch() {
                 audit)     do_audit ;;
                 logs)      shift; _ios_logs "$@" ;;
                 debug)     shift; _ios_debug "$@" ; exit 0 ;;
+                ui)        echo "✗ ios ui drives the simulator only." ; return 1 ;;
                 *)         usage ;;
             esac
             ;;
@@ -2211,6 +2531,7 @@ _dispatch() {
         screenshot) shift; do_screenshot "$@" ;;
         screenshots) shift; do_screenshots_collect "$@" ;;
         see) shift; do_see "$@" ;;
+        ui) shift; do_ui "$@" ;;
         uninstall) shift; do_uninstall "$@" ;;
         watch)    shift; do_watch "$@" ;;
         test)     shift; do_test "$@" ;;
