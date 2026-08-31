@@ -107,11 +107,13 @@ environment. Images are sent at full resolution by default.
 
 ## Commands
 
-`setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [iphone|simulator]` · `uninstall [iphone]` · `watch [iphone] [mode]` ·
+`setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target]` · `uninstall [target]` · `watch [target] [mode]` ·
 `test [filter] [timeout]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
 `logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level] [--script <names>]` · `e2e` · `e2e-run` ·
-`screenshot [name]` · `screenshots collect` · `see [--focus <q>]` ·
+`screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` ·
 `upload [--force] <text>` · `sentry <cmd>`
+
+`[target]` = `device` | `simulator` | `<name|udid>`; no target prefers a connected physical phone and falls back to the simulator.
 
 `device` prefix or `--device <name|udid>` targets a specific physical device.
 `install`, `uninstall`, and `watch` take `iphone` or `simulator` as an explicit target;

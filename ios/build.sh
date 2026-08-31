@@ -280,14 +280,14 @@ _set_mode_device_forced() {
 _select_target() {
     local requested="${1:-auto}"
     case "$requested" in
-        sim|simulator)
+        simulator)
             _set_mode_sim
             _validate_sim_target
             ;;
-        iphone|device)
+        device)
             _set_mode_device_forced
             ;;
-        auto)
+        auto|"")
             if _device_connected; then
                 _set_mode_device_forced
             else
@@ -297,8 +297,47 @@ _select_target() {
             fi
             ;;
         *)
-            echo "✗ Unknown install target '$requested' (use iphone or simulator)."
-            exit 1
+            _DEVICE_SELECTOR="$requested"
+            _set_mode_device_forced
+            ;;
+    esac
+}
+
+# Resolves the capture target (screenshot/see) to _CAPTURE_UDID. Mirrors
+# _select_target but never touches build-only state (bundle id, API_BASE_URL),
+# and resolves the simulator to the booted instance instead of the configured one.
+# Physical devices are resolved in the lockdown namespace (idevice_* + pymobiledevice3).
+_select_capture_target() {
+    _CAPTURE_IS_DEVICE=false
+    local requested="${1:-auto}"
+    case "$requested" in
+        simulator)
+            _CAPTURE_UDID=$(_booted_sim_id)
+            if [[ -z "$_CAPTURE_UDID" ]]; then
+                echo "✗ No booted simulator. Run: ./build.sh ios install"
+                return 1
+            fi
+            ;;
+        device|auto|"")
+            _capture_require_tools
+            if [[ -n "$(idevice_id -l 2>/dev/null)" ]]; then
+                _capture_resolve_device "" || return 1
+                _CAPTURE_IS_DEVICE=true
+            elif [[ "$requested" == "device" ]]; then
+                echo "✗ No physical device connected (USB)."
+                return 1
+            else
+                _CAPTURE_UDID=$(_booted_sim_id)
+                if [[ -z "$_CAPTURE_UDID" ]]; then
+                    echo "✗ No booted simulator and no physical device connected. Run: ./build.sh ios install"
+                    return 1
+                fi
+            fi
+            ;;
+        *)
+            _capture_require_tools
+            _capture_resolve_device "$requested" || return 1
+            _CAPTURE_IS_DEVICE=true
             ;;
     esac
 }
@@ -556,21 +595,157 @@ do_install() {
     _launch_app
 }
 
-do_screenshot() {
-    local name="${1:-}"
-    _check_core_tools
-    local sim_id
-    sim_id=$(_booted_sim_id)
-    if [[ -z "$sim_id" ]]; then
-        echo "✗ No booted simulator. Run: ./build.sh ios install"
+# True when exactly one connected device matches the given selector. Used to
+# disambiguate a lone positional argument on capture/watch commands (selector vs name).
+_selector_matches_device() {
+    local matches
+    matches=$(_capture_device_lines | grep -ci "$1" || true)
+    [[ "$matches" -eq 1 ]]
+}
+
+# Prints "<coredevice_uuid> <legacy_udid>" pairs by cross-referencing devicectl's
+# JSON output, so selectors can address a phone in either UDID namespace.
+_coredevice_udid_map() {
+    local json
+    json=$(mktemp)
+    if ! xcrun devicectl list devices --json-output "$json" >/dev/null 2>&1; then
+        rm -f "$json"
+        return 0
+    fi
+    python3 - "$json" <<'EOF' || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    for dev in d.get("result", {}).get("devices", []):
+        udid = dev.get("hardwareProperties", {}).get("udid", "")
+        identifier = dev.get("identifier", "")
+        if udid and identifier:
+            print(udid, identifier)
+except Exception:
+    pass
+EOF
+    rm -f "$json"
+}
+
+# Prints "<coredevice_uuid> | <legacy_udid> | <name> | <model>" for every
+# USB-connected iPhone. Uses the lockdown namespace (idevice_*), matching the
+# --udid that pymobiledevice3 expects; CoreDevice UUIDs are attached when devicectl
+# knows the phone.
+_capture_device_lines() {
+    local udid name model uuid
+    local map
+    map=$(_coredevice_udid_map)
+    for udid in $(idevice_id -l 2>/dev/null); do
+        name=$(ideviceinfo -u "$udid" -k DeviceName 2>/dev/null || echo "?")
+        model=$(ideviceinfo -u "$udid" -k ProductType 2>/dev/null || echo "?")
+        uuid=$(printf '%s\n' "$map" | awk -v u="$udid" '$1 == u { print $2; exit }')
+        echo "${uuid:--} | $udid | $name | $model"
+    done
+}
+
+_capture_require_tools() {
+    _require_cmd idevice_id "Install with: brew install libimobiledevice"
+    _require_cmd pymobiledevice3 "Install with: uv tool install pymobiledevice3"
+}
+
+# Resolves a device selector (empty = _DEVICE_SELECTOR or "the one connected")
+# to a single lockdown UDID; prints an error listing otherwise.
+_capture_resolve_device() {
+    local selector="${1:-}" match
+    [[ -z "$selector" ]] && selector="$_DEVICE_SELECTOR"
+    local lines
+    lines=$(_capture_device_lines)
+    if [[ -z "$lines" ]]; then
+        echo "✗ No physical device connected (USB)."
         return 1
     fi
+    if [[ -n "$selector" ]]; then
+        match=$(printf '%s\n' "$lines" | grep -i "$selector" || true)
+    else
+        match="$lines"
+    fi
+    local count
+    count=$(printf '%s\n' "$match" | grep -c . || true)
+    if [[ "$count" -eq 0 ]]; then
+        echo "✗ No device matching '$selector' connected. Connected devices:"
+        printf '%s\n' "$lines" | sed 's/^/    /'
+        return 1
+    fi
+    if [[ "$count" -gt 1 ]]; then
+        echo "✗ Multiple devices connected. Pass a name/UDID as the target, or use --device / IOS_DEVICE:"
+        printf '%s\n' "$lines" | sed 's/^/    /'
+        return 1
+    fi
+    _CAPTURE_UDID=$(printf '%s' "$match" | cut -d'|' -f2 | xargs)
+}
+
+_report_capture_error() {
+    local raw="$1"
+    if printf '%s' "$raw" | grep -iqE 'locked|passcode'; then
+        echo "✗ Device locked — unlock and retry."
+    elif printf '%s' "$raw" | grep -iqE 'developer mode'; then
+        echo "✗ Developer Mode is not enabled on the device (Settings → Privacy & Security → Developer Mode)."
+    elif printf '%s' "$raw" | grep -iqE 'pair|trust|unavailable|unreachable|not connected'; then
+        echo "✗ Device unreachable — check cable/pairing and retry."
+    else
+        echo "✗ Screenshot failed."
+    fi
+    printf '%s' "$raw" | grep -v '^[[:space:]]*$' | grep -v ' WARNING ' | tail -3 | sed 's/^/  ↳ /'
+}
+
+_capture_screenshot() {
+    local path="$1" err
+    if [[ "$_CAPTURE_IS_DEVICE" == "true" ]]; then
+        # iOS 17+ removed the lockdown screenshotr service; pymobiledevice3's DVT
+        # screenshot over the native tunnel is the working replacement.
+        if ! err=$(pymobiledevice3 developer dvt screenshot --udid "$_CAPTURE_UDID" "$path" 2>&1 > /dev/null); then
+            _report_capture_error "$err"
+            return 1
+        fi
+    else
+        if ! err=$(xcrun simctl io "$_CAPTURE_UDID" screenshot "$path" 2>&1 > /dev/null); then
+            _report_capture_error "$err"
+            return 1
+        fi
+    fi
+}
+
+_capture_target_label() {
+    if [[ "$_CAPTURE_IS_DEVICE" == "true" ]]; then
+        local model
+        model=$(ideviceinfo -u "$_CAPTURE_UDID" -k ProductType 2>/dev/null || echo "iPhone")
+        echo "$model ($_CAPTURE_UDID)"
+    else
+        echo "simulator"
+    fi
+}
+
+do_screenshot() {
+    _check_core_tools
+    local target="" name=""
+    if [[ $# -gt 0 ]]; then
+        case "$1" in
+            device|simulator|auto)
+                target="$1"
+                name="${2:-}"
+                ;;
+            *)
+                if _selector_matches_device "$1"; then
+                    target="$1"
+                    name="${2:-}"
+                else
+                    name="$1"
+                fi
+                ;;
+        esac
+    fi
+    _select_capture_target "$target" || return 1
     local dir="${PROJECT_ROOT}/build/screenshots"
     mkdir -p "$dir"
     local file="turn_$(date +%Y%m%d-%H%M%S).png"
     [[ -n "$name" ]] && file="${name}.png"
-    xcrun simctl io "$sim_id" screenshot "$dir/$file"
-    echo "✓ Screenshot saved"
+    _capture_screenshot "$dir/$file" || return 1
+    echo "✓ Screenshot saved from $(_capture_target_label)"
     echo "$(cd "$dir" && pwd)/$file"
 }
 
@@ -604,6 +779,11 @@ do_screenshots_collect() {
 }
 
 do_see() {
+    local target=""
+    if [[ $# -gt 0 && "$1" != -* ]]; then
+        target="$1"
+        shift
+    fi
     local focus=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -613,20 +793,16 @@ do_see() {
     done
 
     _check_core_tools
-    local sim_id
-    sim_id=$(_booted_sim_id)
-    if [[ -z "$sim_id" ]]; then
-        echo "✗ No booted simulator. Run: ./build.sh ios install"
-        return 1
-    fi
+    _select_capture_target "$target" || return 1
 
     local dir="${PROJECT_ROOT}/build/screenshots"
     mkdir -p "$dir"
     local file="see_$(date +%Y%m%d-%H%M%S).png"
-    xcrun simctl io "$sim_id" screenshot "$dir/$file" >/dev/null
+    _capture_screenshot "$dir/$file" || return 1
     local path
     path="$(cd "$dir" && pwd)/$file"
     echo "Screenshot: $path"
+    echo "From: $(_capture_target_label)"
     echo ""
 
     local prompt="$focus"
@@ -644,7 +820,7 @@ do_see() {
 
 _ui_usage() {
     cat <<'EOF'
-Usage: ./build.sh [device] ios ui <command> [<args>]
+Usage: ./build.sh ios ui <command> [<args>]
 
   Drive and inspect the booted simulator's UI (simulator only).
   Interactions auto-capture a screenshot afterwards; the path is printed last.
@@ -816,6 +992,11 @@ do_ui() {
         return 0
     fi
 
+    if [[ "${1:-}" != "tap" && "${1:-}" != "swipe" && "${1:-}" != "type" && "${1:-}" != "press" && "${1:-}" != "describe" ]]; then
+        echo "✗ ios ui drives the simulator only (unknown ui command: '$1')."
+        return 1
+    fi
+
     local sub="$1"
     shift
 
@@ -985,10 +1166,22 @@ do_uninstall() {
 do_watch() {
     _detect_project_config
     _check_build_tools
-    local target="auto"
-    if [[ "${1:-}" == "simulator" || "${1:-}" == "iphone" || "${1:-}" == "device" ]]; then
-        target="$1"
-        shift
+    local target="auto" mode="swift"
+    if [[ $# -gt 0 ]]; then
+        case "$1" in
+            device|simulator|auto)
+                target="$1"
+                mode="${2:-swift}"
+                ;;
+            *)
+                if _selector_matches_device "$1"; then
+                    target="$1"
+                    mode="${2:-swift}"
+                else
+                    mode="$1"
+                fi
+                ;;
+        esac
     fi
     _select_target "$target"
     _validate_target
@@ -2415,7 +2608,13 @@ EOF
 
 usage() {
     cat <<EOF
-Usage: ./build.sh [device] [--device <name|udid>] <command> [<args>]
+Usage: ./build.sh ios [--device <name|udid>] <command> [<args>]
+
+  Target selection (install/uninstall/watch/screenshot/see):
+    The optional target after the command is: device | simulator | <name|udid>.
+    No target = auto: prefer a connected physical phone, else the booted simulator.
+    'device' = the connected phone; with several phones connected, pick one via
+    --device or IOS_DEVICE (or pass its name/UDID as the target directly).
 
   Local dev:
     setup              First-time setup: config + generate + build + LSP config (sim only)
@@ -2423,14 +2622,20 @@ Usage: ./build.sh [device] [--device <name|udid>] <command> [<args>]
     configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
     build              Lint → format → incremental build
     clean              Clean build artifacts
-    install [iphone|simulator]   Build + launch (no arg: prefer a connected phone, else simulator)
-    uninstall [iphone] Stop watcher + app + uninstall (default simulator; 'iphone' for device)
-    watch [iphone] [mode]  Build + launch + auto-redeploy (mode: swift|build, default: swift)
-    screenshot [name]  Capture the booted simulator's screen to ios/build/screenshots/ (no build/launch)
+    install [target]   Build + launch
+    uninstall [target] Stop watcher + app + uninstall
+    watch [target] [mode]  Build + launch + auto-redeploy (mode: swift|build, default: swift)
+    screenshot [target] [name]
+                       Capture the connected phone's or booted simulator's screen to
+                       ios/build/screenshots/ (no build/launch). A lone argument is
+                       the screenshot name, unless exactly one connected phone
+                       matches it — then it is that phone's target.
     screenshots collect  Copy scripted in-app screenshots out of the sim container into ios/build/screenshots/
-    see [--focus "<q>"]  Capture the simulator screen and describe it with the vision model (--focus optional)
+    see [target] [--focus "<q>"]
+                       Capture the phone/simulator screen and describe it with the
+                       vision model (--focus optional)
     ui <command>       Drive the simulator UI (baguette): tap | swipe | type | press | describe
-                       ('./build.sh ios ui' shows the full help)
+                       ('./build.sh ios ui' shows the full help; simulator only)
     test [filter] [timeout]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT)
     lint               Run SwiftLint on all Swift sources
     format             Auto-format all Swift sources with SwiftFormat
@@ -2450,18 +2655,13 @@ Usage: ./build.sh [device] [--device <name|udid>] <command> [<args>]
     sentry <cmd>     Sentry queries (TOOLKIT_SENTRY_ENABLED)
 
 Options:
-    --device, -d <name|udid>   Target a specific device by name substring or UDID.
-                               When multiple devices are connected, this is required.
-                               Example: ./build.sh --device "iPhone 15" install
+    --device, -d <name|udid>   Pick which connected phone 'device' means when several
+                               are connected. Also works with a name/UDID target.
+                               Example: ./build.sh ios --device "iPhone 15" screenshot
 
     IOS_DEVICE=<name|udid>     Environment variable fallback for --device.
                                Set once to always target the same device.
                                Example: export IOS_DEVICE="iPhone 15"
-
-Prefix with 'device' to force physical device target (uses network
-or USB). Without 'device', install/uninstall/watch with no target
-prefer a connected physical phone and fall back to the simulator;
-pass 'iphone' to force the device or 'simulator' to force the simulator.
 EOF
 }
 
@@ -2498,32 +2698,6 @@ _dispatch() {
     _detect_project_config
 
     case "${1:-}" in
-        device)
-            shift
-            _DEVICE_FORCED=true
-            case "${1:-}" in
-                build)     do_build ;;
-                clean)     do_clean ;;
-                install)   shift; do_install "$@" ;;
-                uninstall) shift; do_uninstall "$@" ;;
-                watch)     shift; do_watch "$@" ;;
-                e2e)       do_e2e false ;;
-                e2e-run)   do_e2e true ;;
-                sentry)    shift; _dispatch_sentry "$@" ;;
-                update-toolkit) do_update_toolkit ;;
-                configure) do_configure ;;
-                doctor)    do_doctor ;;
-                lint)      do_lint ;;
-                format)    do_format ;;
-                unused)    do_unused ;;
-                analyze)   do_analyze ;;
-                audit)     do_audit ;;
-                logs)      shift; _ios_logs "$@" ;;
-                debug)     shift; _ios_debug "$@" ; exit 0 ;;
-                ui)        echo "✗ ios ui drives the simulator only." ; return 1 ;;
-                *)         usage ;;
-            esac
-            ;;
         setup)    do_setup ;;
         build)    do_build ;;
         clean)    do_clean ;;
