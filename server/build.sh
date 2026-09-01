@@ -329,6 +329,22 @@ do_format() {
     fi
 }
 
+do_sqlc() {
+    _require_cmd sqlc "Install with: brew install sqlc"
+    local log
+    log=$(mktemp)
+    echo "→ Generating sqlc code..."
+    if (cd "$PROJECT_ROOT" && sqlc generate) > "$log" 2>&1; then
+        rm -f "$log"
+        echo "✓ sqlc code generated"
+    else
+        echo "✗ sqlc generation failed:"
+        cat "$log"
+        rm -f "$log"
+        return 1
+    fi
+}
+
 do_docs() {
     _require_cmd swag
     local log
@@ -610,6 +626,7 @@ Usage: ./build.sh server <command>
     format       Auto-format all Go sources (golangci-lint --fix)
     doctor       Check local server build prerequisites
     docs         Generate OpenAPI/Swagger spec from handler annotations
+    sqlc         Regenerate sqlc code from db/queries/*.sql
     migrate up              Run all pending up migrations
     migrate down            Run 1 down migration (default)
     migrate down N          Run N down migrations
@@ -665,6 +682,7 @@ _dispatch() {
         format)       do_format ;;
         doctor)       do_doctor ;;
         docs)         do_docs ;;
+        sqlc)         do_sqlc ;;
         migrate)      shift; do_migrate "$@" ;;
         sql)          shift; do_sql "$@" ;;
         apns-setup)   do_apns_setup ;;
