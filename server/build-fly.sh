@@ -613,6 +613,79 @@ _fly_deploy() {
     fi
 }
 
+_fly_mpg_clusters() {
+    # Lists all Managed Postgres clusters (active + deleted) with the
+    # configured FLY_DB_CLUSTER flagged. Optional org slug arg; when omitted,
+    # the org is resolved from the configured cluster's status.
+    local org="${1:-}"
+    echo ""
+    echo "=== MPG Clusters ==="
+    echo "  Configured FLY_DB_CLUSTER: ${FLY_DB_CLUSTER:-<unset>}"
+
+    if [[ -z "$org" ]]; then
+        local status_out
+        status_out=$(fly mpg status "$FLY_DB_CLUSTER" --json 2>&1 || true)
+        org=$(echo "$status_out" | jq -r '.data.organization.slug // .data.Organization.Slug // ""' 2>/dev/null || true)
+        if [[ -n "$org" ]]; then
+            echo "  (org resolved from cluster status: $org)"
+        elif [[ -n "$status_out" ]]; then
+            echo "  (cluster status unavailable — raw response:)"
+            echo "$status_out" | jq -c . 2>/dev/null | sed 's/^/    /'
+        fi
+    fi
+
+    local jq_prog='def vlabel: if .version != null then (if .version == 1 then "v1" else "v2" end) else (if (.Version // 0) == 0 then "v1" else "v2" end) end;
+        .[] | "\(.id // .Id // "?")|\(vlabel)|\(.name // .Name // "?")|\(.status // .Status // "?")|\(.region // .Region // "?")|\(.plan // .Plan // "?")|\(.organization.slug // .Organization.Slug // "?")"'
+
+    local list_args=()
+    [[ -n "$org" ]] && list_args=(-o "$org")
+    local fly_list=(fly mpg list "${list_args[@]+"${list_args[@]}"}")
+    local fly_list_deleted=(fly mpg list --deleted "${list_args[@]+"${list_args[@]}"}")
+
+    echo ""
+    echo "── Active ──────────────────────────────────────────────────────────"
+    local active
+    active=$("${fly_list[@]}" --json 2>&1 || true)
+    local active_parsed
+    active_parsed=$(echo "$active" | jq -r "$jq_prog" 2>/dev/null || true)
+    if [[ -z "$active_parsed" ]]; then
+        echo "  (none)"
+        if [[ -n "$active" && "$active" != "[]" ]]; then
+            echo "  └─ $(echo "$active" | head -1)"
+        fi
+    else
+        echo "$active_parsed" | while IFS='|' read -r cid version name status region plan c_org; do
+            if [[ "$cid" == "$FLY_DB_CLUSTER" ]]; then
+                printf '  → %-12s %-3s %-28s status=%-8s region=%-4s plan=%-10s org=%s\n' "$cid" "$version" "$name" "$status" "$region" "$plan" "$c_org"
+            else
+                printf '    %-12s %-3s %-28s status=%-8s region=%-4s plan=%-10s org=%s\n' "$cid" "$version" "$name" "$status" "$region" "$plan" "$c_org"
+            fi
+        done
+    fi
+
+    echo ""
+    echo "── Deleted ─────────────────────────────────────────────────────────"
+    local deleted
+    deleted=$("${fly_list_deleted[@]}" --json 2>&1 || true)
+    local deleted_parsed
+    deleted_parsed=$(echo "$deleted" | jq -r "$jq_prog" 2>/dev/null || true)
+    if [[ -z "$deleted_parsed" ]]; then
+        echo "  (none)"
+        if [[ -n "$deleted" && "$deleted" != "[]" ]]; then
+            echo "  └─ $(echo "$deleted" | head -1)"
+        fi
+    else
+        echo "$deleted_parsed" | while IFS='|' read -r cid version name status region plan c_org; do
+            if [[ "$cid" == "$FLY_DB_CLUSTER" ]]; then
+                printf '  → %-12s %-3s %-28s status=%-8s region=%-4s plan=%-10s org=%s\n' "$cid" "$version" "$name" "$status" "$region" "$plan" "$c_org"
+            else
+                printf '    %-12s %-3s %-28s status=%-8s region=%-4s plan=%-10s org=%s\n' "$cid" "$version" "$name" "$status" "$region" "$plan" "$c_org"
+            fi
+        done
+    fi
+    echo ""
+}
+
 _fly_snapshots() {
     echo "=== DB Backups ==="
     local backup_output

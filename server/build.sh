@@ -626,6 +626,7 @@ Usage: ./build.sh server <command>
     live deploy [--dry-run] [--strategy rolling|immediate] [--force] <text>   Pre-check, snapshot DB, deploy, verify self-test
     live rollback [--dry-run] [--force]  Restore DB from backup + redeploy app
     live snapshots    List database backups
+    live clusters [org]   List MPG clusters (active + deleted); org optional
     live deployments  List deploy and rollback tags
     live releases     Show deployment history
     live machines     List individual VM status
@@ -677,6 +678,7 @@ _dispatch() {
                 deploy)      shift; _fly_deploy "$@" ;;
                 rollback)    shift; _fly_rollback "$@" ;;
                 snapshots)   _fly_snapshots ;;
+                clusters)    shift; _fly_mpg_clusters "$@" ;;
                 deployments) _fly_deployments ;;
                 releases)    _fly_releases ;;
                 machines)    _fly_machines ;;
