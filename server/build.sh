@@ -72,6 +72,7 @@ _check_build_tools() {
     _require_cmd go "Install with: brew install go"
     _require_cmd golangci-lint "Install with: brew install golangci-lint"
     _require_cmd jq "Install with: brew install jq"
+    _require_cmd sqlc "Install with: brew install sqlc"
 }
 
 _guard_not_running() {
@@ -123,8 +124,7 @@ do_build() {
     _check_build_tools
     _sync_locale
 
-    echo "→ Generating sqlc..."
-    (cd "$PROJECT_ROOT" && sqlc generate) > /dev/null 2>&1
+    do_sqlc || return 1
 
     _check_quality || return 1
 
@@ -228,7 +228,7 @@ _require_server() {
 do_test() {
     _require_cmd go "Install with: brew install go"
     _sync_locale
-    (cd "$PROJECT_ROOT" && sqlc generate) > /dev/null 2>&1
+    do_sqlc || return 1
     _check_quality || return 1
 
     # Parse optional timeout from args (any bare number is treated as a timeout override)
