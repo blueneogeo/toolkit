@@ -33,6 +33,14 @@ per-project via the platform's `./build.sh configure`.
 - `ios/config/README.md` — full iOS toolkit reference
 - `server/config/README.md` — full server toolkit reference
 
+## Build server
+
+Sandboxed agents cannot reach devices, `~/Library` caches, the signing keychain, the `go` build cache, or `fly` credentials. Run `./build.sh builder start` once in your own terminal; breaching `ios`/`server` commands then run on the relay with full user rights.
+
+- `./build.sh builder <start|stop|status>` manages the relay (`status` is default; binds `127.0.0.1` only).
+- Forwarding triggers automatically when `SCODE_SANDBOXED` is set, or explicitly with `--server` on an `ios`/`server` command; only the 15 ios, 7 server, and 10 live ops in the relay allowlist forward — anything else runs locally despite the flag. Always local: `ios setup|clean|upload|update-toolkit|configure|doctor|lint|format|unused|analyze|audit`, `server clean|debug|start|stop|status|logs|migrate|sql|apns-setup|email-setup|setup`, live `setup|ci-setup`, root `debug|vision|builder`.
+- The relay allows only the breaching `ios`/`server` op allowlist, runs one op at a time (a second gets busy), streams output live, propagates the real exit code, and `Ctrl-C` cancels the remote op.
+
 ## Vision (shared)
 
 `vision <image> --focus "<question>"` asks a vision model about an image and prints the

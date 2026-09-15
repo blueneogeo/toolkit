@@ -111,7 +111,7 @@ environment. Images are sent at full resolution by default.
 `test [filter] [timeout]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
 `logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level] [--script <names>]` · `e2e` · `e2e-run` ·
 `screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` ·
-`upload [--force] <text>` · `sentry <cmd>`
+`upload [--force] <text>` · `sentry <cmd>` · `[--server]`
 
 `[target]` = `device` | `simulator` | `<name|udid>`; no target prefers a connected physical phone and falls back to the simulator.
 
@@ -119,4 +119,4 @@ environment. Images are sent at full resolution by default.
 `install`, `uninstall`, and `watch` take `iphone` or `simulator` as an explicit target;
 with no target they prefer a connected phone and fall back to the simulator.
 `IOS_DEVICE=<name|udid>` selects which connected iPhone to use when several are present
-(a preference, not a force). See `./build.sh` (no args) for full usage.
+(a preference, not a force). Breaching commands auto-forward to the user-launched relay when `SCODE_SANDBOXED` is set; pass `--server` explicitly outside sandboxes. See `./build.sh` (no args) for full usage.

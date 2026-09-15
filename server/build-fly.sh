@@ -280,19 +280,32 @@ _fly_deploy() {
     local deploy_text=""
     local DRY_RUN=0
     local DEPLOY_STRATEGY="rolling"
-    for arg in "$@"; do
-        case "$arg" in
-            --dry-run) DRY_RUN=1 ;;
-            --strategy) shift; DEPLOY_STRATEGY="${1:-rolling}"; shift ;;
-            --strategy=*) DEPLOY_STRATEGY="${arg#*=}" ;;
-            --force) : ;;
-            *) deploy_text="$arg"; break ;;
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run) DRY_RUN=1; shift ;;
+            --strategy)
+                shift
+                if [[ -n "${1:-}" && "$1" != --* ]]; then
+                    DEPLOY_STRATEGY="$1"
+                    shift
+                else
+                    DEPLOY_STRATEGY="rolling"
+                fi
+                ;;
+            --strategy=*) DEPLOY_STRATEGY="${1#*=}"; shift ;;
+            --force) shift ;;
+            *)
+                if [[ -z "$deploy_text" ]]; then
+                    deploy_text="$1"
+                fi
+                shift
+                ;;
         esac
     done
 
     if [[ -z "$deploy_text" ]]; then
         echo "✗ Deploy text is required."
-        echo "  Usage: ./build.sh server deploy [--dry-run] [--strategy rolling|immediate] [--force] \"deploy text\""
+        echo "  Usage: ./build.sh server deploy [--dry-run] [--strategy rolling|immediate] [--force] \"deploy text\" (flags may come before or after text)"
         return 1
     fi
 
@@ -699,10 +712,13 @@ _fly_snapshots() {
 
 _fly_rollback() {
     local dry_run=""
-    if [[ "${1:-}" == "--dry-run" ]]; then
-        dry_run=true
-        shift
-    fi
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run) dry_run=true; shift ;;
+            --force) shift ;;
+            *) shift ;;
+        esac
+    done
 
     local total_start=$SECONDS
     echo ""

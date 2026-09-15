@@ -28,13 +28,15 @@ _srv_forward() {
     payload=$(python3 -c 'import json,sys; print(json.dumps({"op": sys.argv[1], "args": sys.argv[2:]}))' "$op" "$@")
     trap 'curl -sS -m 5 -X POST "$TURN_BUILD_SERVER_URL/kill" >/dev/null 2>&1; echo "→ Build server op cancelled"; exit 130' INT
     set +e
+    local libdir
+    libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     curl -sS -N -X POST "$TURN_BUILD_SERVER_URL/run" -H 'Content-Type: application/json' --data "$payload" 2>/dev/null \
-        | awk '{ if (NR > 1) print prev; prev = $0 } END { if (NR == 0) exit 99; if (prev ~ /^__TURN_SRV_EXIT=-?[0-9]+$/) { c = prev; sub(/^__TURN_SRV_EXIT=/, "", c); c += 0; exit (c >= 0 && c <= 125 ? c : 1) } print prev; exit 1 }'
+        | python3 "$libdir/build-server-filter.py"
     local parts=("${PIPESTATUS[@]}")
     set -e
     trap - INT
     if [[ "${parts[0]:-1}" -ne 0 ]]; then
-        echo "✗ Build server not reachable at $TURN_BUILD_SERVER_URL — start it with ./toolkit/build-server/run.sh" >&2
+        echo "✗ Build server not reachable at $TURN_BUILD_SERVER_URL — start it with ./build.sh builder start" >&2
         return 1
     fi
     return "${parts[1]:-1}"

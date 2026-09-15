@@ -744,6 +744,7 @@ do_screenshot() {
     local dir="${PROJECT_ROOT}/build/screenshots"
     mkdir -p "$dir"
     local file="turn_$(date +%Y%m%d-%H%M%S).png"
+    name="${name//\//_}"
     [[ -n "$name" ]] && file="${name}.png"
     _capture_screenshot "$dir/$file" || return 1
     echo "✓ Screenshot saved from $(_capture_target_label)"
@@ -2415,6 +2416,17 @@ _ios_logs() {
 
 # ── Debug session ────────────────────────────────────────────────────
 
+_sanitize_script_names() {
+    local names="$1"
+    local pattern='^[A-Za-z0-9_, -]+$'
+    if [[ "$names" =~ $pattern && "$names" =~ [A-Za-z0-9_] ]]; then
+        printf '%s' "$names"
+        return 0
+    fi
+    echo "✗ Invalid --script names: use comma-separated identifiers (letters, digits, _, -, space)."
+    return 1
+}
+
 _clear_scriptor_marker() {
     local marker="${DEBUG_MARKER_NAME:-scriptor-ready}"
     case "$_TARGET_SDK" in
@@ -2472,6 +2484,9 @@ _ios_debug() {
     if [[ -n "$script_names" && "${TOOLKIT_DEBUG_SCRIPTS:-false}" != "true" ]]; then
         echo "⚠ --script ignored: set TOOLKIT_DEBUG_SCRIPTS=true in build.properties to enable debug scripts."
         script_names=""
+    fi
+    if [[ -n "$script_names" ]]; then
+        script_names=$(_sanitize_script_names "$script_names") || return 1
     fi
     local debug_dir="${TOOLKIT_DEBUG_SCRIPT_DIR:-debug}"
     if [[ -n "$script_names" ]]; then
@@ -2614,8 +2629,9 @@ usage() {
     cat <<EOF
 Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
 
-  Appends [--server] to run a breaching command on the user-launched build
-  server instead of locally (automatic inside scode sandboxes).
+  Append [--server] to run a relay-allowlisted command on the user-launched
+  build server instead of locally (automatic inside scode sandboxes).
+  Non-allowlisted commands run locally despite the flag.
 
   Target selection (install/uninstall/watch/screenshot/see):
     The optional target after the command is: device | simulator | <name|udid>.
@@ -2644,6 +2660,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     ui <command>       Drive the simulator UI (baguette): tap | swipe | type | press | describe
                        ('./build.sh ios ui' shows the full help; simulator only)
     test [filter] [timeout]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT)
+    tsan-test [filter] [timeout]   Run unit tests with ThreadSanitizer; same filter/timeout as test (default $TEST_TIMEOUT)
     lint               Run SwiftLint on all Swift sources
     format             Auto-format all Swift sources with SwiftFormat
     unused             Scan for unused code with Periphery
@@ -2665,6 +2682,10 @@ Options:
     --device, -d <name|udid>   Pick which connected phone 'device' means when several
                                are connected. Also works with a name/UDID target.
                                Example: ./build.sh ios --device "iPhone 15" screenshot
+
+    --server                   Run a relay-allowlisted command on the user-launched
+                               build server instead of locally.
+                               Example: ./build.sh ios --server test
 
     IOS_DEVICE=<name|udid>     Environment variable fallback for --device.
                                Set once to always target the same device.

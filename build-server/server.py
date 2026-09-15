@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import pty
 import signal
 import subprocess
 import threading
@@ -114,15 +115,28 @@ class Handler(BaseHTTPRequestHandler):
             env = dict(os.environ)
             env["PYTHONUNBUFFERED"] = "1"
             env.pop("SCODE_SANDBOXED", None)
-            proc = subprocess.Popen(
-                argv,
-                cwd=REPO_ROOT,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                env=env,
-            )
+            proc = None
+            primary = None
+            replica = None
+            try:
+                primary, replica = pty.openpty()
+                proc = subprocess.Popen(
+                    argv,
+                    cwd=REPO_ROOT,
+                    stdin=subprocess.DEVNULL,
+                    stdout=replica,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    close_fds=True,
+                    env=env,
+                )
+                os.close(replica)
+            except Exception:
+                if primary is not None:
+                    os.close(primary)
+                if replica is not None:
+                    os.close(replica)
+                raise
             with proc_lock:
                 holder["proc"] = proc
             self.send_response(200)
@@ -130,13 +144,18 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 while True:
-                    chunk = proc.stdout.read(4096)
+                    try:
+                        chunk = os.read(primary, 1024)
+                    except OSError:
+                        break
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    self.wfile.write(chunk.replace(b"\r\n", b"\n"))
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 pass
+            finally:
+                os.close(primary)
             code = proc.wait()
             print("%s finish op=%s exit=%d" % (now(), op, code), flush=True)
             try:

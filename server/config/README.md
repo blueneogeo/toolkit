@@ -60,6 +60,8 @@ Go module path from `go.mod`, `cmd/server` entry point. Overridable via
 `docs` · `migrate up\|down` · `sql <query>` · `apns-setup` · `email-setup` ·
 `live status` · `live logs [N\|tail]` · `live deploy [--dry-run] [--strategy] [--force] <text>` ·
 `live rollback [--dry-run] [--force]` · `live snapshots` · `live deployments` · `live releases` ·
-`live machines` · `live setup` · `live ci-setup` · `live sentry`
+`live machines` · `live setup` · `live ci-setup` · `live sentry` · `[--server]`
+
+Breaching commands auto-forward to the user-launched relay when `SCODE_SANDBOXED` is set; pass `--server` explicitly outside sandboxes. Live guarded ops (`deploy`, `rollback`) via the relay need `--dry-run`.
 
 See `./build.sh server` (no args) for full usage.

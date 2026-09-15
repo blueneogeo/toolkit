@@ -607,9 +607,10 @@ do_local_logs() {
 
 usage() {
     cat <<EOF
-Usage: ./build.sh server [--server] <command>
-  Append [--server] to run a breaching command on the user-launched build
-  server instead of locally (automatic inside scode sandboxes).
+Usage: ./build.sh server [--server] <command> (--server accepted in any position)
+  Append [--server] to run a relay-allowlisted command on the user-launched
+  build server instead of locally (automatic inside scode sandboxes).
+  Non-allowlisted commands run locally despite the flag.
   Local dev:
     build        Compile Go binary
     clean        Remove build artifacts (bin/, .watch/)
