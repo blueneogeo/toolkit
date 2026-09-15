@@ -166,7 +166,7 @@ _detect_device() {
             echo "  Available devices:"
             echo "$all_devices" | while IFS= read -r line; do
                 local name udid
-                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}')
+                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
                 name=$(echo "$line" | sed -E "s/ *${udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
                 echo "    $name  ($udid)"
             done
@@ -178,7 +178,7 @@ _detect_device() {
             echo ""
             echo "$all_devices" | while IFS= read -r line; do
                 local name udid
-                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}')
+                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
                 name=$(echo "$line" | sed -E "s/ *${udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
                 echo "    $name  ($udid)"
             done
@@ -188,13 +188,13 @@ _detect_device() {
         match_count=$(echo "$all_devices" | wc -l | tr -d ' ')
         if [[ "$match_count" -gt 1 ]]; then
             local first_name first_udid
-            first_udid=$(echo "$all_devices" | head -1 | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}')
+            first_udid=$(echo "$all_devices" | head -1 | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
             first_name=$(echo "$all_devices" | head -1 | sed -E "s/ *${first_udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
             echo "✗ Multiple devices found. Use --device to select one, or set IOS_DEVICE:"
             echo ""
             echo "$all_devices" | while IFS= read -r line; do
                 local name udid
-                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}')
+                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
                 name=$(echo "$line" | sed -E "s/ *${udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
                 echo "    $name  ($udid)"
             done
@@ -206,7 +206,7 @@ _detect_device() {
         dest="$all_devices"
     fi
 
-    DEVICE_UDID=$(echo "$dest" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}')
+    DEVICE_UDID=$(echo "$dest" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
     DEVICE_NAME=$(echo "$dest" | sed -E "s/ *${DEVICE_UDID}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
     DEVICE_DEST="generic/platform=iOS"
 
@@ -1932,6 +1932,9 @@ do_lint() {
     if [[ -n "$SWIFTLINT_CONFIG" ]]; then
         lint_args+=(--config "$SWIFTLINT_CONFIG")
     fi
+    local cache_dir="$PROJECT_ROOT/build/.swiftlint-cache"
+    mkdir -p "$cache_dir"
+    lint_args+=(--cache-path "$cache_dir")
     output=$(cd "$PROJECT_ROOT" && swiftlint "${lint_args[@]}" 2>&1) && exit_code=0 || exit_code=$?
     if [[ $exit_code -ne 0 ]] || echo "$output" | grep -qiE "warning:|error:"; then
         echo "✗ Lint failed:"
@@ -2125,7 +2128,7 @@ do_doctor() {
     device_count=$(echo "$device_info" | grep -c . || true)
     if [[ "$device_count" -eq 1 ]]; then
         local dev_udid dev_name
-        dev_udid=$(echo "$device_info" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}' | head -1)
+        dev_udid=$(echo "$device_info" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}' | head -1)
         dev_name=$(echo "$device_info" | sed -E "s/ *${dev_udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
         echo "  ✓ Device: $dev_name ($dev_udid)"
     elif [[ "$device_count" -gt 1 ]]; then
