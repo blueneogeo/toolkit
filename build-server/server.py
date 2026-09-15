@@ -159,7 +159,9 @@ class Handler(BaseHTTPRequestHandler):
             code = proc.wait()
             print("%s finish op=%s exit=%d" % (now(), op, code), flush=True)
             try:
-                self.wfile.write(("__TURN_SRV_EXIT=%d\n" % code).encode())
+                # Leading newline: the child may end without one (or with a
+                # dangling ANSI reset), so frame the trailer on its own line.
+                self.wfile.write(("\n__TURN_SRV_EXIT=%d\n" % code).encode())
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 pass

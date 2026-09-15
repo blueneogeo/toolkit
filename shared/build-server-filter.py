@@ -18,6 +18,7 @@ def main():
         sys.exit(99)
     text = prev.decode("utf-8", errors="replace")
     stripped = text[:-1] if text.endswith("\n") else text
+    stripped = re.sub(r"\x1b\[[0-9;]*m", "", stripped)
     m = re.fullmatch(r"__TURN_SRV_EXIT=(-?[0-9]+)", stripped)
     if m:
         code = int(m.group(1))

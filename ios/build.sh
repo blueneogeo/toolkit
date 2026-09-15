@@ -2350,10 +2350,10 @@ _ios_logs() {
                     _require_cmd idevicesyslog "Install with: brew install libimobiledevice"
                     if [[ -n "$cat_filter" ]]; then
                         echo "→ Streaming device logs (filter: $cat_filter, Ctrl-C to stop)..."
-                        idevicesyslog 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        idevicesyslog -u "$DEVICE_UDID" 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
                     else
                         echo "→ Streaming device logs (Ctrl-C to stop)..."
-                        idevicesyslog 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        idevicesyslog -u "$DEVICE_UDID" 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
                     fi
                     ;;
                 iphonesimulator)
