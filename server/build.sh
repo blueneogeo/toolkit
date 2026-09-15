@@ -32,6 +32,7 @@ _detect_project
 
 source "$TOOLKIT_DIR/../shared/build-utils.sh"
 source "$TOOLKIT_DIR/../shared/sentry.sh"
+source "$TOOLKIT_DIR/../shared/build-server-client.sh"
 source "$TOOLKIT_DIR/build-env.sh"
 source "$TOOLKIT_DIR/build-fly.sh"
 
@@ -606,7 +607,9 @@ do_local_logs() {
 
 usage() {
     cat <<EOF
-Usage: ./build.sh server <command>
+Usage: ./build.sh server [--server] <command>
+  Append [--server] to run a breaching command on the user-launched build
+  server instead of locally (automatic inside scode sandboxes).
   Local dev:
     build        Compile Go binary
     clean        Remove build artifacts (bin/, .watch/)
@@ -662,11 +665,29 @@ _dispatch_sentry() {
 }
 
 _dispatch() {
+    local _args=() op="" code=0
     for arg in "${@:-}"; do
+        [[ -z "$arg" ]] && continue
+        if [[ "$arg" == "--server" ]]; then _SERVER_FORCED=true; else _args+=("$arg"); fi
+    done
+    if ((${#_args[@]})); then set -- "${_args[@]}"; else set --; fi
+    for arg in "$@"; do
         [[ "$arg" == "--force" ]] && DEPLOY_FORCE=1
     done
 
     _load_config
+
+    if [[ "$_SERVER_FORCED" == "true" || -n "${SCODE_SANDBOXED:-}" ]]; then
+        op=$(_srv_op_for server "${1:-}" "${2:-}") || op=""
+        if [[ -n "$op" ]]; then
+            if [[ "${1:-}" == "live" ]]; then shift 2; else shift; fi
+            set +e
+            _srv_forward "$op" "$@"
+            code=$?
+            set -e
+            return "$code"
+        fi
+    fi
 
     case "${1:-}" in
         build)        do_build ;;

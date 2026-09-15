@@ -33,6 +33,7 @@ fi
 source "$SCRIPT_DIR/../shared/build-utils.sh"
 source "$SCRIPT_DIR/../shared/sentry.sh"
 source "$SCRIPT_DIR/../shared/vision.sh"
+source "$SCRIPT_DIR/../shared/build-server-client.sh"
 source "$SCRIPT_DIR/build-lifecycle.sh"
 source "$SCRIPT_DIR/build-e2e.sh"
 source "$SCRIPT_DIR/build-upload.sh"
@@ -2611,7 +2612,10 @@ EOF
 
 usage() {
     cat <<EOF
-Usage: ./build.sh ios [--device <name|udid>] <command> [<args>]
+Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
+
+  Appends [--server] to run a breaching command on the user-launched build
+  server instead of locally (automatic inside scode sandboxes).
 
   Target selection (install/uninstall/watch/screenshot/see):
     The optional target after the command is: device | simulator | <name|udid>.
@@ -2670,6 +2674,7 @@ EOF
 
 _dispatch() {
     local _NEW_ARGS=()
+    local op="" code=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --device|-d)
@@ -2680,6 +2685,10 @@ _dispatch() {
                 fi
                 _DEVICE_SELECTOR="$1"
                 _DEVICE_FORCED=true
+                shift
+                ;;
+            --server)
+                _SERVER_FORCED=true
                 shift
                 ;;
             *)
@@ -2699,6 +2708,18 @@ _dispatch() {
     fi
 
     _detect_project_config
+
+    if [[ "$_SERVER_FORCED" == "true" || -n "${SCODE_SANDBOXED:-}" ]]; then
+        op=$(_srv_op_for ios "${1:-}") || op=""
+        if [[ -n "$op" ]]; then
+            shift
+            set +e
+            _srv_forward "$op" "$@"
+            code=$?
+            set -e
+            return "$code"
+        fi
+    fi
 
     case "${1:-}" in
         setup)    do_setup ;;
