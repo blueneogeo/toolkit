@@ -589,7 +589,16 @@ do_install() {
     _detect_project_config
     do_format
     _check_build_tools
-    _select_target "${1:-auto}"
+    _QUIET_INSTALL=false
+    local _install_target="auto"
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --quiet|-q) _QUIET_INSTALL=true ;;
+            *) _install_target="$arg" ;;
+        esac
+    done
+    _select_target "$_install_target"
     _validate_target
     _guard_not_running
     _do_build build
@@ -2645,7 +2654,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
     build              Lint → format → incremental build
     clean              Clean build artifacts
-    install [target]   Build + launch
+    install [target] [--quiet|-q]   Build + launch (--quiet skips opening Device Hub)
     uninstall [target] Stop watcher + app + uninstall
     watch [target] [mode]  Build + launch + auto-redeploy (mode: swift|build, default: swift)
     screenshot [target] [name]

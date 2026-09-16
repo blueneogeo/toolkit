@@ -107,7 +107,7 @@ environment. Images are sent at full resolution by default.
 
 ## Commands
 
-`setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target]` · `uninstall [target]` · `watch [target] [mode]` ·
+`setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target] [--quiet|-q]` · `uninstall [target]` · `watch [target] [mode]` ·
 `test [filter] [timeout]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
 `logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level] [--script <names>]` · `e2e` · `e2e-run` ·
 `screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` ·

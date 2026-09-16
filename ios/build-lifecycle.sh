@@ -85,6 +85,13 @@ _install_app() {
 
 # ── Unified launch ──────────────────────────────────────────────────
 
+_open_simulator_gui() {
+    if [[ -n "${SIM_ID:-}" ]]; then
+        open "devices://device/open?id=$SIM_ID" 2>/dev/null || true
+    fi
+    open -a DeviceHub 2>/dev/null || open -a Simulator 2>/dev/null || true
+}
+
 _launch_app() {
     echo "→ Launching on $_TARGET_NAME"
     local out
@@ -99,7 +106,9 @@ _launch_app() {
             else
                 xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" > /dev/null
             fi
-            open -a Simulator
+            if [[ "${_QUIET_INSTALL:-false}" != "true" ]]; then
+                _open_simulator_gui
+            fi
             ;;
         iphoneos)
             [[ -z "${DEVICE_UDID:-}" ]] && { echo "✗ Device UDID unknown."; return 1; }
