@@ -5,11 +5,14 @@ import pty
 import signal
 import subprocess
 import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8471"))
 REPO_ROOT = os.environ.get("REPO_ROOT", os.getcwd())
+PIDFILE = os.environ.get("BUILDER_PIDFILE", "")
+_STARTED = time.monotonic()
 
 IOS_CMDS = {"build", "install", "uninstall", "watch", "test", "tsan-test", "e2e",
             "e2e-run", "screenshot", "screenshots", "see", "ui", "logs", "debug", "sentry"}
@@ -58,6 +61,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self.send_text(200, "ok")
+        elif self.path == "/info":
+            raw = json.dumps({
+                "project": REPO_ROOT,
+                "port": PORT,
+                "pid": os.getpid(),
+                "uptime_s": int(time.monotonic() - _STARTED),
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
         else:
             self.send_text(404, "not found")
 
@@ -176,6 +191,12 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    if PIDFILE:
+        try:
+            with open(PIDFILE, "w") as f:
+                f.write("%d\n" % os.getpid())
+        except OSError:
+            pass
     print("%s build-server listening on 127.0.0.1:%d repo=%s" % (now(), PORT, REPO_ROOT), flush=True)
     srv.serve_forever()
 

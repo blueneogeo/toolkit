@@ -32,7 +32,7 @@ _detect_project
 
 source "$TOOLKIT_DIR/../shared/build-utils.sh"
 source "$TOOLKIT_DIR/../shared/sentry.sh"
-source "$TOOLKIT_DIR/../shared/build-server-client.sh"
+source "$TOOLKIT_DIR/../shared/build-client.sh"
 source "$TOOLKIT_DIR/build-env.sh"
 source "$TOOLKIT_DIR/build-fly.sh"
 

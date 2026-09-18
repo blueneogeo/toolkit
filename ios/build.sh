@@ -33,7 +33,7 @@ fi
 source "$SCRIPT_DIR/../shared/build-utils.sh"
 source "$SCRIPT_DIR/../shared/sentry.sh"
 source "$SCRIPT_DIR/../shared/vision.sh"
-source "$SCRIPT_DIR/../shared/build-server-client.sh"
+source "$SCRIPT_DIR/../shared/build-client.sh"
 source "$SCRIPT_DIR/build-lifecycle.sh"
 source "$SCRIPT_DIR/build-e2e.sh"
 source "$SCRIPT_DIR/build-upload.sh"
