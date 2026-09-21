@@ -102,8 +102,15 @@ _register_firewall() {
     fi
 }
 
+_sandbox_go_env() {
+    mkdir -p "${TMPDIR}/golangci-lint-cache" "${TMPDIR}/go-build-cache"
+    export GOLANGCI_LINT_CACHE="${TMPDIR}/golangci-lint-cache"
+    export GOCACHE="${TMPDIR}/go-build-cache"
+}
+
 _check_quality() {
     _require_cmd golangci-lint "Install with: brew install golangci-lint"
+    _sandbox_go_env
     local log
     log=$(mktemp)
     if (cd "$PROJECT_ROOT" && golangci-lint run ./...) > "$log" 2>&1; then
@@ -124,6 +131,7 @@ _sync_locale() {
 do_build() {
     _check_build_tools
     _sync_locale
+    _sandbox_go_env
 
     do_sqlc || return 1
 
@@ -301,6 +309,7 @@ do_test() {
 do_lint() {
     _require_cmd golangci-lint "Install with: brew install golangci-lint"
     _sync_locale
+    _sandbox_go_env
     local log
     log=$(mktemp)
     if (cd "$PROJECT_ROOT" && golangci-lint run ./...) > "$log" 2>&1; then
@@ -319,6 +328,7 @@ do_format() {
     local log
     log=$(mktemp)
     echo "→ Formatting..."
+    _sandbox_go_env
     if (cd "$PROJECT_ROOT" && golangci-lint run --fix ./...) > "$log" 2>&1; then
         rm -f "$log"
         echo "✓ Formatting complete"

@@ -14,7 +14,7 @@ REPO_ROOT = os.environ.get("REPO_ROOT", os.getcwd())
 PIDFILE = os.environ.get("BUILDER_PIDFILE", "")
 _STARTED = time.monotonic()
 
-IOS_CMDS = {"build", "install", "uninstall", "watch", "test", "tsan-test", "e2e",
+IOS_CMDS = {"build", "install", "launch", "uninstall", "watch", "test", "tsan-test", "e2e",
             "e2e-run", "screenshot", "screenshots", "see", "ui", "logs", "debug", "sentry"}
 SERVER_CMDS = {"build", "test", "lint", "format", "docs", "sqlc", "watch"}
 LIVE_SUBS = {"status", "logs", "snapshots", "clusters",

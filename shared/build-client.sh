@@ -18,7 +18,7 @@ _SERVER_FORCED=false
 
 _srv_op_for() {
     case "$1/$2" in
-        ios/build|ios/install|ios/uninstall|ios/watch|ios/test|ios/tsan-test|ios/e2e|ios/e2e-run|ios/screenshot|ios/screenshots|ios/see|ios/ui|ios/logs|ios/debug|ios/sentry)
+        ios/build|ios/install|ios/launch|ios/uninstall|ios/watch|ios/test|ios/tsan-test|ios/e2e|ios/e2e-run|ios/screenshot|ios/screenshots|ios/see|ios/ui|ios/logs|ios/debug|ios/sentry)
             echo "ios-${2}" ;;
         server/build|server/test|server/lint|server/format|server/docs|server/sqlc|server/watch)
             echo "server-${2}" ;;

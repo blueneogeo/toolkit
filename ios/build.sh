@@ -605,6 +605,33 @@ do_install() {
     _launch_app
 }
 
+do_launch() {
+    _detect_project_config
+    _check_build_tools
+    local _install_target="auto"
+    local -a _launch_args=()
+    local _seen_dashdash=false
+    local arg
+    for arg in "$@"; do
+        if $_seen_dashdash; then
+            _launch_args+=("$arg")
+            continue
+        fi
+        case "$arg" in
+            --) _seen_dashdash=true ;;
+            *) _install_target="$arg" ;;
+        esac
+    done
+    _select_target "$_install_target"
+    _validate_target
+    _guard_not_running
+    if [[ -z "$(_find_app)" ]]; then
+        echo "→ No built app found, building first"
+        _do_build build || return 1
+    fi
+    _launch_app "${_launch_args[@]}"
+}
+
 # True when exactly one connected device matches the given selector. Used to
 # disambiguate a lone positional argument on capture/watch commands (selector vs name).
 _selector_matches_device() {
@@ -1615,9 +1642,32 @@ do_concurrency_check() {
     echo "✓ Concurrency check passed"
 }
 
+do_paper_duplicate_check() {
+    local view_src="$PROJECT_ROOT/$SOURCE_DIR/view"
+    local matches
+    matches=$(grep -rn 'Color(red: 0\.957, green: 0\.941, blue: 0\.902)' "$view_src" --include="*.swift" 2>/dev/null | grep -v 'view/PreviewSupport.swift' || true)
+
+    if [[ -n "$matches" ]]; then
+        echo ""
+        echo "  ✗ Hardcoded feedPaper duplicate — use the token, not the literal"
+        while IFS= read -r line; do
+            echo "    ${line#$PROJECT_ROOT/}"
+        done <<< "$matches"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Color(red: 0.957, green: 0.941, blue: 0.902) is #F4F0E6 = settings.feedPaper."
+        echo "  Production code: state.settings.feedPaper."
+        echo "  #Preview backdrops: PreviewPaper.fill (ios/Turn/view/PreviewSupport.swift)."
+        echo "  This gate has no override — use the token."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    echo "✓ feedPaper duplicate check passed"
+}
+
 do_structure_check() {
     do_override_syntax_check || return 1
     do_any_check || return 1
+    do_paper_duplicate_check || return 1
     do_message_bus_check || return 1
     do_view_state_mutation_check || return 1
     do_mark_spacing_check || return 1
@@ -2655,6 +2705,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     build              Lint → format → incremental build
     clean              Clean build artifacts
     install [target] [--quiet|-q]   Build + launch (--quiet skips opening Device Hub)
+    launch [target] -- [args...]    Launch installed app, forwarding args (e.g. -turnLaunch personDetail)
     uninstall [target] Stop watcher + app + uninstall
     watch [target] [mode]  Build + launch + auto-redeploy (mode: swift|build, default: swift)
     screenshot [target] [name]
@@ -2756,6 +2807,7 @@ _dispatch() {
         build)    do_build ;;
         clean)    do_clean ;;
         install)  shift; do_install "$@" ;;
+        launch)   shift; do_launch "$@" ;;
         screenshot) shift; do_screenshot "$@" ;;
         screenshots) shift; do_screenshots_collect "$@" ;;
         see) shift; do_see "$@" ;;
