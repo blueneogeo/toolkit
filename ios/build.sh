@@ -629,7 +629,11 @@ do_launch() {
         echo "→ No built app found, building first"
         _do_build build || return 1
     fi
-    _launch_app "${_launch_args[@]}"
+    if [[ ${#_launch_args[@]} -gt 0 ]]; then
+        _launch_app "${_launch_args[@]}"
+    else
+        _launch_app
+    fi
 }
 
 # True when exactly one connected device matches the given selector. Used to
