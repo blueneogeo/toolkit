@@ -2620,7 +2620,7 @@ EOF
                 done < "$fifo"
             } &
             reader_pid=$!
-            do_install
+            do_install "${_DEVICE_SELECTOR:-device}"
             if [[ -n "$script_names" ]]; then
                 _write_scriptor_marker
             fi
@@ -2630,7 +2630,7 @@ EOF
             ;;
 
         iphonesimulator)
-            do_install
+            do_install simulator
             if [[ -n "$script_names" ]]; then
                 _write_scriptor_marker
             fi
