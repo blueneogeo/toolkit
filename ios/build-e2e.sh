@@ -80,12 +80,12 @@ do_e2e() {
     if [[ "$skip_build" != "true" ]]; then
         echo "  Building e2e tests..."
         env "${e2e_env[@]}" xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$e2e_scheme" \
-          -sdk "$_TARGET_SDK" -destination "$_TARGET_DEST" -configuration Debug \
+          -sdk "$_TARGET_SDK" -destination "$_TARGET_DEST" -configuration "$(_build_config)" \
           build-for-testing $_BUILD_EXTRA $provisioning_args 2>&1 || return 1
     fi
 
     echo "  Running e2e tests..."
     env "${e2e_env[@]}" xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$e2e_scheme" \
-      -sdk "$_TARGET_SDK" -destination "$_TARGET_DEST" -configuration Debug \
+      -sdk "$_TARGET_SDK" -destination "$_TARGET_DEST" -configuration "$(_build_config)" \
       test-without-building $_BUILD_EXTRA $provisioning_args 2>&1
 }

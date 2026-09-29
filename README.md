@@ -8,7 +8,7 @@ generate a thin `build.sh` entry via `./build.sh`-style scaffolding.
 
 | Folder | Status | Use |
 |---|---|---|---|
-| `ios/` | ready | iOS app builds, lint gates, install/watch/test, logs/debug, e2e, TestFlight upload, Sentry queries, screenshots/vision |
+| `ios/` | ready | iOS app builds, lint gates, install/watch/test with Debug/Profile/Release configurations, Instruments profiling, logs/debug, e2e, TestFlight upload, Sentry queries, screenshots/vision |
 | `server/` | ready | Go server builds, start/stop/watch, lint/test, deploy/rollback (Fly.io), migrations, Sentry queries |
 | `android/` | planned | — |
 | `web/` | planned | — |

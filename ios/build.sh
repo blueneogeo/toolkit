@@ -37,6 +37,7 @@ source "$SCRIPT_DIR/../shared/build-client.sh"
 source "$SCRIPT_DIR/build-lifecycle.sh"
 source "$SCRIPT_DIR/build-e2e.sh"
 source "$SCRIPT_DIR/build-upload.sh"
+source "$SCRIPT_DIR/build-profile.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/ios.pid"
 TEST_TIMEOUT=120
@@ -243,6 +244,22 @@ _TARGET_NAME=""
 _BUILD_EXTRA=""
 _DEVICE_FORCED=false
 _DEVICE_SELECTOR=""
+_BUILD_CONFIG=""
+
+# The configuration builds, tests and profiles use: Debug unless --config
+# names another the project defines (e.g. Profile, Release).
+_build_config() {
+    echo "${_BUILD_CONFIG:-Debug}"
+}
+
+# Every configuration but Release installs as the development app.
+_bundle_id_for_config() {
+    if [[ "$(_build_config)" == "Release" ]]; then
+        echo "$BUNDLE_ID"
+    else
+        echo "${BUNDLE_ID}${DEV_BUNDLE_SUFFIX}"
+    fi
+}
 
 _set_mode_sim() {
     _TARGET_SDK="iphonesimulator"
@@ -253,7 +270,7 @@ _set_mode_sim() {
         export API_BASE_URL
         API_BASE_URL="${API_BASE_URL:-http://localhost:8080}"
     fi
-    BUNDLE_ID="${BUNDLE_ID}${DEV_BUNDLE_SUFFIX}"
+    BUNDLE_ID="$(_bundle_id_for_config)"
 }
 
 _set_mode_device() {
@@ -267,7 +284,7 @@ _set_mode_device() {
         host_ip=$(ipconfig getifaddr en0 2>/dev/null || echo "")
         API_BASE_URL="http://${host_ip:-localhost}:8080"
     fi
-    BUNDLE_ID="${BUNDLE_ID}${DEV_BUNDLE_SUFFIX}"
+    BUNDLE_ID="$(_bundle_id_for_config)"
 }
 
 _set_mode_device_forced() {
@@ -409,7 +426,8 @@ _ensure_project() {
 
 _do_build() {
     local action="${1:-build}"
-    local cfg="${_BUILD_CONFIG:-Debug}"
+    local cfg
+    cfg="$(_build_config)"
     _check_build_tools
     _validate_target
     _ensure_project
@@ -440,7 +458,7 @@ _find_app() {
     local derived
     derived=$(ls -dt ~/Library/Developer/Xcode/DerivedData/${PROJECT_NAME}-*/ 2>/dev/null | head -1)
     if [[ -n "$derived" ]]; then
-        find "$derived"Build/Products/Debug-"$_TARGET_SDK" \
+        find "$derived"Build/Products/"$(_build_config)"-"$_TARGET_SDK" \
             -name "${APP_EXECUTABLE}.app" -maxdepth 1 2>/dev/null | head -1
     fi
 }
@@ -579,7 +597,7 @@ do_clean() {
     _ensure_project
     echo "Cleaning $PROJECT_NAME for $_TARGET_NAME ($_TARGET_SDK)."
     (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration Debug clean 2>&1)
+      -destination "$_TARGET_DEST" -configuration "$(_build_config)" clean 2>&1)
     rm -rf "$PROJECT_ROOT/build"
     rm -rf ~/Library/Developer/Xcode/DerivedData/${PROJECT_NAME}-*
     echo "Removed build/ and DerivedData."
@@ -1291,6 +1309,13 @@ _require_server() {
     fi
 }
 
+# Optimised configurations hide internal symbols unless told otherwise, and
+# the tests import the app with @testable.
+_testability_setting() {
+    [[ "$(_build_config)" != "Debug" ]] && echo "ENABLE_TESTABILITY=YES"
+    return 0
+}
+
 do_tsan_test() {
     _detect_project_config
     _check_core_tools
@@ -1314,11 +1339,11 @@ do_tsan_test() {
 
     echo "  Building tests for TSan..."
     (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration Debug \
+      -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
       build-for-testing 2>&1) || return 1
 
     local test_args=(-project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration Debug test-without-building \
+      -destination "$_TARGET_DEST" -configuration "$(_build_config)" test-without-building \
       -enableThreadSanitizer YES)
 
     if [[ -n "$test_filter" ]]; then
@@ -1358,11 +1383,11 @@ do_test() {
 
     echo "  Building tests..."
     (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration Debug \
+      -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
       build-for-testing 2>&1) || return 1
 
     local test_args=(-project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration Debug test-without-building)
+      -destination "$_TARGET_DEST" -configuration "$(_build_config)" test-without-building)
 
     if [[ -n "$test_filter" ]]; then
         test_args+=(-only-testing "$TEST_TARGET/$test_filter")
@@ -2718,6 +2743,13 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
                        the screenshot name, unless exactly one connected phone
                        matches it — then it is that phone's target.
     screenshots collect  Copy scripted in-app screenshots out of the sim container into ios/build/screenshots/
+    profile [target] [--script <names>] [--seconds N] [--render] [--template <name>] [--name <label>]
+                       Record an Instruments trace (Time Profiler by default) of the app on
+                       the connected phone or booted simulator and print the frame rate and
+                       heaviest functions. --script launches the app running debug scripts
+                       (e.g. a scripted swipe) so the interaction is measured; --render adds
+                       render-server and GPU frame times and offscreen passes. Traces go to
+                       build/traces/.
     see [target] [--focus "<q>"]
                        Capture the phone/simulator screen and describe it with the
                        vision model (--focus optional)
@@ -2751,6 +2783,13 @@ Options:
                                build server instead of locally.
                                Example: ./build.sh ios --server test
 
+    --config, -c <name>        Build configuration for build, install, launch, watch,
+                               debug, test and profile: debug (default), profile
+                               (optimised, still the development app and server) or
+                               release (the App Store build; it can't be installed
+                               directly). IOS_CONFIG sets a default.
+                               Example: ./build.sh ios --config profile install device
+
     IOS_DEVICE=<name|udid>     Environment variable fallback for --device.
                                Set once to always target the same device.
                                Example: export IOS_DEVICE="iPhone 15"
@@ -2776,6 +2815,17 @@ _dispatch() {
                 _SERVER_FORCED=true
                 shift
                 ;;
+            --config|-c)
+                shift
+                if [[ -z "${1:-}" || "${1:0:1}" == "-" ]]; then
+                    echo "✗ --config requires a build configuration (debug, profile, release)"
+                    exit 1
+                fi
+                local lower
+                lower=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+                _BUILD_CONFIG="$(echo "${lower:0:1}" | tr '[:lower:]' '[:upper:]')${lower:1}"
+                shift
+                ;;
             *)
                 _NEW_ARGS+=("$1")
                 shift
@@ -2786,6 +2836,12 @@ _dispatch() {
         set -- "${_NEW_ARGS[@]}"
     else
         set --
+    fi
+
+    if [[ -z "$_BUILD_CONFIG" && -n "${IOS_CONFIG:-}" ]]; then
+        local lower
+        lower=$(echo "$IOS_CONFIG" | tr '[:upper:]' '[:lower:]')
+        _BUILD_CONFIG="$(echo "${lower:0:1}" | tr '[:lower:]' '[:upper:]')${lower:1}"
     fi
 
     if [[ -z "$_DEVICE_SELECTOR" && -n "${IOS_DEVICE:-}" ]]; then
@@ -2833,6 +2889,7 @@ _dispatch() {
         analyze)  do_analyze ;;
         audit)    do_audit ;;
         logs)     shift; _ios_logs "$@" ;;
+        profile)  shift; do_profile "$@" ;;
         debug)    shift; _ios_debug "$@" ; exit 0 ;;
         *)        usage ;;
     esac

@@ -105,13 +105,60 @@ Capture and inspect the app's UI on the simulator:
 `TOOLKIT_MODEL_API_KEY` / `TOOLKIT_MODEL_BASE_URL` / `TOOLKIT_VISION_MODEL` from the
 environment. Images are sent at full resolution by default.
 
+## Build configurations
+
+Every building command (`build`, `install`, `launch`, `watch`, `debug`, `test`,
+`tsan-test`, `e2e`, `profile`, `clean`) uses the configuration picked with
+`--config <name>` / `-c <name>`, or `IOS_CONFIG=<name>` as a default. The name is
+case-insensitive and must be a configuration the project defines. Debug is the default.
+
+- `debug`: unoptimised; the development app (`BUNDLE_ID` + `DEV_BUNDLE_SUFFIX`).
+- Any other non-Release configuration, such as a `Profile` the project defines as
+  `release`-type in `project.yml`, also installs as the development app. Use it to
+  judge performance: Debug builds are much slower (no optimisation, extra checks).
+- `release`: the App Store configuration, which uses the plain `BUNDLE_ID`. It is
+  usually distribution-signed, so it can't be installed on a phone directly.
+
+Tests built with a non-Debug configuration get `ENABLE_TESTABILITY=YES` so that
+`@testable import` works.
+
+```bash
+./build.sh ios --config profile install device
+./build.sh ios --config profile profile device --script deck_swipe_perf --render
+```
+
+## Profiling
+
+`profile [target] [--script <names>] [--seconds N] [--render] [--template <name>] [--name <label>]`
+records an Instruments trace (`xctrace`, Time Profiler by default) of the installed
+app on the connected phone or the booted simulator. It then prints a summary:
+
+- the frame lines a debug script's frame monitor marked (Points of Interest signposts
+  named `perf start`, `fps` and `perf summary`);
+- with `--render`: frames shown per second, render-server and GPU time per frame,
+  offscreen passes per frame, and a table per 5 seconds;
+- sampled CPU per thread, the heaviest functions, and the app's own hot code.
+
+`--script` launches the app with those debug scripts running immediately, skipping
+the start-up marker wait (`TURN_DEBUG_SCRIPT_NO_MARKER=1`), so a scripted
+interaction is measured end to end. Traces are kept in `build/traces/` so you can
+open them in Instruments.
+
+Notes:
+- Install the configuration you want to measure first; a Profile build gives
+  realistic numbers.
+- `--render` adds the Hitches and GPU instruments, which drop the Points of
+  Interest rows. Run once with and once without to get both.
+- Don't take phone screenshots during a recording; they can disturb it.
+
 ## Commands
 
 `setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target] [--quiet|-q]` · `uninstall [target]` · `watch [target] [mode]` ·
 `test [filter] [timeout]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
 `logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level] [--script <names>]` · `e2e` · `e2e-run` ·
-`screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` ·
-`upload [--force] <text>` · `sentry <cmd>` · `[--server]`
+`screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` · `ui <cmd>` ·
+`profile [target] [--script] [--seconds] [--render] [--template] [--name]` ·
+`upload [--force] <text>` · `sentry <cmd>` · `[--server]` · `[--config <name>]`
 
 `[target]` = `device` | `simulator` | `<name|udid>`; no target prefers a connected physical phone and falls back to the simulator.
 
