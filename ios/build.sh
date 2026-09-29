@@ -2413,13 +2413,14 @@ _ios_logs() {
         echo "✗ Logs disabled. Set TOOLKIT_LOGS_ENABLED=true in build.properties."
         return 1
     fi
-    _select_target "${1:-auto}"
+    local target="auto"
+    case "${1:-}" in
+        iphone|device|simulator) target="$1"; shift ;;
+    esac
+    _select_target "$target"
     local cat_filter=""
     local level_filter=""
     local cmd=""
-    case "${1:-}" in
-        iphone|device|simulator) shift ;;
-    esac
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --cat) cat_filter="${2:-}"; shift 2 ;;
@@ -2554,10 +2555,12 @@ _ios_debug() {
         echo "✗ Logs disabled. Set TOOLKIT_LOGS_ENABLED=true in build.properties."
         return 1
     fi
-    _select_target "${1:-auto}"
-    case "${1:-}" in
-        iphone|device|simulator) shift ;;
-    esac
+    local target="auto"
+    if [[ -n "${1:-}" && "$1" != --* ]]; then
+        target="$1"
+        shift
+    fi
+    _select_target "$target"
     local cat_filter=""
     local level_filter=""
     local script_names=""
