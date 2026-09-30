@@ -11,6 +11,97 @@
 
 # FLY_APP, FLY_DB_CLUSTER, GITHUB_REPO from shared/build.properties
 
+# Takes an incremental backup of the live database and prints its ID.
+_fly_db_backup() {
+    local _backup_out="$PROJECT_ROOT/.watch/backup.log"
+    mkdir -p "$(dirname "$_backup_out")"
+    if ! fly mpg backup create "$FLY_DB_CLUSTER" --type incr > "$_backup_out" 2>&1; then
+        echo "  ✗ database backup failed — full log: $_backup_out" >&2
+        tail -n 10 "$_backup_out" | sed 's/^/    /' >&2
+        return 1
+    fi
+    sleep 3
+    local backup
+    backup=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'max_by(.start).id // ""' 2>/dev/null || true)
+    if [[ -z "$backup" ]]; then
+        echo "  ✗ could not capture backup ID — full log: $_backup_out" >&2
+        tail -n 10 "$_backup_out" | sed 's/^/    /' >&2
+        return 1
+    fi
+    echo "$backup"
+}
+
+# Runs SQL on the live database through a temporary proxy, as one
+# transaction that stops at the first error. It is read-only unless --write
+# is given; a write asks before running and takes a backup first.
+_fly_sql() {
+    local read_only=1 sql=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --write) read_only=0; shift ;;
+            --force) shift ;;
+            *) sql="$1"; shift ;;
+        esac
+    done
+    if [[ -z "$sql" ]]; then
+        echo "Usage: ./build.sh server live sql [--write [--force]] '<sql>'"
+        echo "  Runs SQL on the live database as one transaction, read-only by default."
+        echo "  --write allows changes: it asks first (--force skips that) and takes a database backup."
+        return 1
+    fi
+    if ! command -v psql &>/dev/null; then
+        echo "✗ psql not found. Install with: brew install postgresql@16"
+        return 1
+    fi
+
+    local creds user password dbname
+    creds=$(fly mpg status "$FLY_DB_CLUSTER" --json 2>/dev/null || true)
+    user=$(echo "$creds" | jq -r '.credentials.user // ""')
+    password=$(echo "$creds" | jq -r '.credentials.password // ""')
+    dbname=$(echo "$creds" | jq -r '.credentials.dbname // ""')
+    if [[ -z "$user" || -z "$password" || -z "$dbname" ]]; then
+        echo "✗ could not read the database credentials of $FLY_DB_CLUSTER (is fly logged in?)"
+        return 1
+    fi
+
+    if [[ $read_only -eq 0 ]]; then
+        _confirm_live "Live SQL on $FLY_DB_CLUSTER
+
+    $sql
+
+    A database backup is taken first." || return 1
+        echo "→ Taking a database backup..."
+        local backup
+        backup=$(_fly_db_backup) || return 1
+        echo "  ✓ backup: $backup"
+    fi
+
+    local port=16399 proxy_log="$PROJECT_ROOT/.watch/sql-proxy.log"
+    mkdir -p "$(dirname "$proxy_log")"
+    fly mpg proxy "$FLY_DB_CLUSTER" --local-port "$port" > "$proxy_log" 2>&1 &
+    local proxy_pid=$!
+    local waited=0
+    until nc -z 127.0.0.1 "$port" 2>/dev/null; do
+        if ! kill -0 "$proxy_pid" 2>/dev/null || [[ $waited -ge 30 ]]; then
+            echo "✗ database proxy did not start — log: $proxy_log"
+            kill "$proxy_pid" 2>/dev/null || true
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    local options=""
+    [[ $read_only -eq 1 ]] && options="-c default_transaction_read_only=on"
+    local code=0
+    PGPASSWORD="$password" PGOPTIONS="$options" psql \
+        "host=127.0.0.1 port=$port user=$user dbname=$dbname sslmode=disable" \
+        -v ON_ERROR_STOP=1 --single-transaction -c "$sql" || code=$?
+    kill "$proxy_pid" 2>/dev/null || true
+    wait "$proxy_pid" 2>/dev/null || true
+    return $code
+}
+
 _fly_status() {
     local GREEN RED YELLOW RESET BOLD
     if [[ -t 1 ]]; then
@@ -420,20 +511,7 @@ _fly_deploy() {
             fi
         fi
         if [[ -z "$backup" ]]; then
-            local _backup_out="$PROJECT_ROOT/.watch/backup.log"
-            mkdir -p "$(dirname "$_backup_out")"
-            if ! fly mpg backup create "$FLY_DB_CLUSTER" --type incr > "$_backup_out" 2>&1; then
-                echo "  ✗ database backup failed — full log: $_backup_out"
-                tail -n 10 "$_backup_out" | sed 's/^/    /'
-                return 1
-            fi
-            sleep 3
-            backup=$(fly mpg backup list "$FLY_DB_CLUSTER" --json 2>/dev/null | jq -r 'max_by(.start).id // ""' 2>/dev/null || true)
-            if [[ -z "$backup" ]]; then
-                echo "  ✗ could not capture backup ID — full log: $_backup_out"
-                tail -n 10 "$_backup_out" | sed 's/^/    /'
-                return 1
-            fi
+            backup=$(_fly_db_backup) || return 1
             echo "  ✓ backup created: $backup"
         fi
     fi

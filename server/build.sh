@@ -688,6 +688,8 @@ Usage: ./build.sh server [--server] <command> (--server accepted in any position
     live deploy [--dry-run] [--strategy rolling|immediate] [--force] <text>   Pre-check, snapshot DB, deploy, verify self-test
     live rollback [--dry-run] [--force]  Restore DB from backup + redeploy app
     live snapshots    List database backups
+    live sql [--write [--force]] '<sql>'  Run SQL on the live database in one
+                      transaction; read-only unless --write, which asks and backs up first
     live clusters [org]   List MPG clusters (active + deleted); org optional
     live deployments  List deploy and rollback tags
     live releases     Show deployment history
@@ -759,6 +761,7 @@ _dispatch() {
                 deploy)      shift; _fly_deploy "$@" ;;
                 rollback)    shift; _fly_rollback "$@" ;;
                 snapshots)   _fly_snapshots ;;
+                sql)         shift; _fly_sql "$@" ;;
                 clusters)    shift; _fly_mpg_clusters "$@" ;;
                 deployments) _fly_deployments ;;
                 releases)    _fly_releases ;;
