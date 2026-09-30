@@ -124,8 +124,18 @@ _check_quality() {
     fi
 }
 
+# Copies every language's strings (en.toml, nl.toml, …) next to the server's
+# locale package; debug-only files stay behind.
 _sync_locale() {
-    cp "$PROJECT_ROOT/${LOCALE_SRC:-../shared/locales/}en.toml" "$PROJECT_ROOT/${LOCALE_DST:-internal/locale/}en.toml"
+    local src="$PROJECT_ROOT/${LOCALE_SRC:-../shared/locales/}"
+    local dst="$PROJECT_ROOT/${LOCALE_DST:-internal/locale/}"
+    local file
+    for file in "$src"*.toml; do
+        case "$(basename "$file")" in
+            debug.*) continue ;;
+        esac
+        cp "$file" "$dst"
+    done
 }
 
 do_build() {
