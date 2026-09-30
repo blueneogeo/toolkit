@@ -272,14 +272,33 @@ do_test() {
     test_log=$(mktemp)
 
     local test_exit=0
-    if [ "${1:-}" = "service" ]; then
+    if [ "${1:-}" = "service" ] || [ "${1:-}" = "emails" ]; then
+        echo "✗ 'test ${1}' is replaced by 'test e2e [local|live]', which reads the emails that really arrive."
+        rm -f "$test_log"
+        return 1
+    elif [ "${1:-}" = "e2e" ]; then
+        # Plays Turn's users against a running server through its API and
+        # reads the emails that really arrive (internal/e2e).
         _load_env
-        _require_server
-        (cd "$PROJECT_ROOT" && go test -timeout "$timeout" -tags=service ./internal/service/ -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
-    elif [ "${1:-}" = "emails" ]; then
-        _load_env
-        _require_server
-        (cd "$PROJECT_ROOT" && go test -timeout "$timeout" -tags=service ./internal/service/ -v -count=1 -run 'TestInvite') 2>&1 | tee "$test_log" || test_exit=$?
+        local e2e_url
+        if [ "${2:-local}" = "live" ]; then
+            e2e_url="${LIVE_BASE_URL:-}"
+            if [[ -z "$e2e_url" && -n "${FLY_APP:-}" ]]; then
+                e2e_url="https://${FLY_APP}.fly.dev"
+            fi
+        else
+            e2e_url="http://localhost:${SERVER_PORT}"
+        fi
+        if [[ -z "$e2e_url" || -z "${RESEND_API_KEY:-}" || -z "${E2E_INBOX_DOMAIN:-}" ]]; then
+            echo "✗ The end-to-end test needs the server address, RESEND_API_KEY and E2E_INBOX_DOMAIN."
+            rm -f "$test_log"
+            return 1
+        fi
+        _require_server "$e2e_url/api/health"
+        # A full run waits for real mail; the default test timeout is too short.
+        [[ "$timeout" == "${TEST_TIMEOUT}s" ]] && timeout="600s"
+        echo "→ End-to-end test against $e2e_url"
+        (cd "$PROJECT_ROOT" && E2E_BASE_URL="$e2e_url" go test -timeout "$timeout" -tags=e2e ./internal/e2e -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "local" ]; then
         export APP_BASE_URL="http://localhost:${SERVER_PORT}"
         _require_server
@@ -642,10 +661,11 @@ Usage: ./build.sh server [--server] <command> (--server accepted in any position
     debug        Stream raw server log lines (for combined debug)
     watch        Start + auto-rebuild on Go changes
     test [N] [subcommand]    Run all Go tests + lint (timeout in seconds, default $TEST_TIMEOUT)
-    test service             Test email delivery pipeline (needs local server + Resend API key)
-    test emails              Test email invites only
     test local               Check local server self-test health
     test live                Check production server self-test health
+    test e2e [local|live]    End-to-end test: sign-up, invites, pushes, replies,
+                             emails and every link in them, against a running
+                             server (needs RESEND_API_KEY, E2E_INBOX_DOMAIN)
     lint         Run golangci-lint
     format       Auto-format all Go sources (golangci-lint --fix)
     doctor       Check local server build prerequisites

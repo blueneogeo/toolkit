@@ -615,6 +615,19 @@ _fly_deploy() {
     fi
     echo "  ⏱  $((SECONDS - step_start))s"
 
+    # ── End-to-end test ──────────────────────────────────────────
+    # Plays sign-up, invites, pushes and replies against the deploy and
+    # checks every email and link. It reports; it never rolls back.
+    if [[ $st_failed -eq 0 && "${E2E_AFTER_DEPLOY:-true}" != "false" ]]; then
+        echo ""
+        echo "End-to-end test against the deploy"
+        if do_test e2e live; then
+            echo "  ✓ end-to-end test passed"
+        else
+            echo "  ✗ end-to-end test failed — the deploy is live; see above, or roll back with: ./build.sh server rollback"
+        fi
+    fi
+
     # ── Summary ──────────────────────────────────────────────────
     echo ""
     local total_duration=$((SECONDS - total_start))
