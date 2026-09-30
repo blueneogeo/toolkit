@@ -298,7 +298,7 @@ do_test() {
         # A full run waits for real mail; the default test timeout is too short.
         [[ "$timeout" == "${TEST_TIMEOUT}s" ]] && timeout="600s"
         echo "→ End-to-end test against $e2e_url"
-        (cd "$PROJECT_ROOT" && E2E_BASE_URL="$e2e_url" go test -timeout "$timeout" -tags=e2e ./internal/e2e -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
+        (cd "$PROJECT_ROOT" && E2E_BASE_URL="$e2e_url" E2E_MAIL_DIR="$PROJECT_ROOT/build/e2e-mail/${2:-local}" go test -timeout "$timeout" -tags=e2e ./internal/e2e -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "local" ]; then
         export APP_BASE_URL="http://localhost:${SERVER_PORT}"
         _require_server
@@ -665,7 +665,8 @@ Usage: ./build.sh server [--server] <command> (--server accepted in any position
     test live                Check production server self-test health
     test e2e [local|live]    End-to-end test: sign-up, invites, pushes, replies,
                              emails and every link in them, against a running
-                             server (needs RESEND_API_KEY, E2E_INBOX_DOMAIN)
+                             server (needs RESEND_API_KEY, E2E_INBOX_DOMAIN);
+                             keeps each email in build/e2e-mail/
     lint         Run golangci-lint
     format       Auto-format all Go sources (golangci-lint --fix)
     doctor       Check local server build prerequisites
