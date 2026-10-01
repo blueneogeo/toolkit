@@ -1316,6 +1316,55 @@ _testability_setting() {
     return 0
 }
 
+# Once XCTest prints its final "All tests" summary, xcodebuild sometimes never
+# exits (a known simulator teardown bug). Give it a short grace period, then
+# stop it and report the tests' own verdict.
+_run_tests_with_watchdog() {
+    local hard_timeout=$1
+    shift
+    local grace=20
+    local log_file
+    log_file=$(mktemp -t turn-ios-test)
+    local xc_pid
+    xcodebuild "$@" > >(tee "$log_file") 2>&1 &
+    xc_pid=$!
+
+    local started=$SECONDS
+    local summary_at=""
+    local failed=false
+    while kill -0 "$xc_pid" 2>/dev/null; do
+        if [[ -z "$summary_at" ]] && grep -q "Test Suite 'All tests'" "$log_file" 2>/dev/null; then
+            summary_at=$SECONDS
+            grep -q "Test Suite 'All tests' failed" "$log_file" 2>/dev/null && failed=true
+        fi
+        if [[ -n "$summary_at" ]] && (( SECONDS - summary_at >= grace )); then
+            echo "  xcodebuild stalled after the tests; stopping it."
+            kill "$xc_pid" 2>/dev/null || true
+            sleep 2
+            kill -9 "$xc_pid" 2>/dev/null || true
+            break
+        fi
+        if (( SECONDS - started >= hard_timeout )); then
+            echo "  Tests exceeded ${hard_timeout}s; stopping xcodebuild."
+            kill "$xc_pid" 2>/dev/null || true
+            sleep 2
+            kill -9 "$xc_pid" 2>/dev/null || true
+            break
+        fi
+        sleep 1
+    done
+
+    local rc=0
+    wait "$xc_pid" 2>/dev/null || rc=$?
+    rm -f "$log_file"
+
+    if [[ -n "$summary_at" ]]; then
+        [[ "$failed" == "true" ]] && return 65
+        return 0
+    fi
+    return "$rc"
+}
+
 do_tsan_test() {
     _detect_project_config
     _check_core_tools
@@ -1329,18 +1378,25 @@ do_tsan_test() {
 
     local test_filter=""
     local test_timeout=$TEST_TIMEOUT
+    local skip_build=false
     for arg in "$@"; do
         if [[ "$arg" =~ ^[0-9]+$ ]]; then
             test_timeout="$arg"
+        elif [[ "$arg" == "--no-build" ]]; then
+            skip_build=true
         else
             test_filter="$arg"
         fi
     done
 
-    echo "  Building tests for TSan..."
-    (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
-      build-for-testing 2>&1) || return 1
+    if [[ "$skip_build" == "true" ]]; then
+        echo "  Skipping build (--no-build)."
+    else
+        echo "  Building tests for TSan..."
+        (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
+          -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
+          build-for-testing 2>&1) || return 1
+    fi
 
     local test_args=(-project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
       -destination "$_TARGET_DEST" -configuration "$(_build_config)" test-without-building \
@@ -1353,11 +1409,9 @@ do_tsan_test() {
         echo "  Running TSan tests... (timeout: ${test_timeout}s)"
     fi
 
-    if command -v timeout &>/dev/null; then
-        (cd "$PROJECT_ROOT" && timeout "$test_timeout" xcodebuild "${test_args[@]}" 2>&1)
-    else
-        (cd "$PROJECT_ROOT" && xcodebuild "${test_args[@]}" 2>&1)
-    fi
+    _terminate_app
+
+    (cd "$PROJECT_ROOT" && _run_tests_with_watchdog "$test_timeout" "${test_args[@]}")
 }
 
 do_test() {
@@ -1373,18 +1427,25 @@ do_test() {
 
     local test_filter=""
     local test_timeout=$TEST_TIMEOUT
+    local skip_build=false
     for arg in "$@"; do
         if [[ "$arg" =~ ^[0-9]+$ ]]; then
             test_timeout="$arg"
+        elif [[ "$arg" == "--no-build" ]]; then
+            skip_build=true
         else
             test_filter="$arg"
         fi
     done
 
-    echo "  Building tests..."
-    (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
-      build-for-testing 2>&1) || return 1
+    if [[ "$skip_build" == "true" ]]; then
+        echo "  Skipping build (--no-build)."
+    else
+        echo "  Building tests..."
+        (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
+          -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
+          build-for-testing 2>&1) || return 1
+    fi
 
     local test_args=(-project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
       -destination "$_TARGET_DEST" -configuration "$(_build_config)" test-without-building)
@@ -1396,11 +1457,9 @@ do_test() {
         echo "  Running tests... (timeout: ${test_timeout}s)"
     fi
 
-    if command -v timeout &>/dev/null; then
-        (cd "$PROJECT_ROOT" && timeout "$test_timeout" xcodebuild "${test_args[@]}" 2>&1)
-    else
-        (cd "$PROJECT_ROOT" && xcodebuild "${test_args[@]}" 2>&1)
-    fi
+    _terminate_app
+
+    (cd "$PROJECT_ROOT" && _run_tests_with_watchdog "$test_timeout" "${test_args[@]}")
 }
 
 # ── Architecture lint gates ──────────────────────────────────────────
@@ -2758,8 +2817,8 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
                        vision model (--focus optional)
     ui <command>       Drive the simulator UI (baguette): tap | swipe | type | press | describe
                        ('./build.sh ios ui' shows the full help; simulator only)
-    test [filter] [timeout]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT)
-    tsan-test [filter] [timeout]   Run unit tests with ThreadSanitizer; same filter/timeout as test (default $TEST_TIMEOUT)
+    test [filter] [timeout] [--no-build]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT); --no-build skips the build
+    tsan-test [filter] [timeout] [--no-build]   Run unit tests with ThreadSanitizer; same as test
     lint               Run SwiftLint on all Swift sources
     format             Auto-format all Swift sources with SwiftFormat
     unused             Scan for unused code with Periphery
