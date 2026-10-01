@@ -56,13 +56,13 @@ _fly_sql() {
 
     local creds user password dbname
     creds=$(fly mpg status "$FLY_DB_CLUSTER" --json 2>/dev/null || true)
-    user=$(echo "$creds" | jq -r '.credentials.user // ""')
-    password=$(echo "$creds" | jq -r '.credentials.password // ""')
-    dbname=$(echo "$creds" | jq -r '.credentials.dbname // ""')
-    if [[ -z "$user" || -z "$password" || -z "$dbname" ]]; then
+    if ! echo "$creds" | jq -e '.credentials.user and .credentials.password and .credentials.dbname' >/dev/null 2>&1; then
         echo "✗ could not read the database credentials of $FLY_DB_CLUSTER (is fly logged in?)"
         return 1
     fi
+    user=$(echo "$creds" | jq -r '.credentials.user')
+    password=$(echo "$creds" | jq -r '.credentials.password')
+    dbname=$(echo "$creds" | jq -r '.credentials.dbname')
 
     if [[ $read_only -eq 0 ]]; then
         _confirm_live "Live SQL on $FLY_DB_CLUSTER

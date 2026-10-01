@@ -24,7 +24,7 @@ _srv_op_for() {
             echo "server-${2}" ;;
         server/live)
             case "${3:-}" in
-                status|logs|deploy|rollback|snapshots|clusters|deployments|releases|machines|sentry)
+                status|logs|sql|deploy|rollback|snapshots|clusters|deployments|releases|machines|sentry)
                     echo "server-live-${3}" ;;
                 *) return 1 ;;
             esac ;;

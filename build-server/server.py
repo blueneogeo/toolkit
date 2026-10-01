@@ -17,7 +17,7 @@ _STARTED = time.monotonic()
 IOS_CMDS = {"build", "clean", "install", "launch", "uninstall", "watch", "test", "tsan-test", "e2e",
             "e2e-run", "screenshot", "screenshots", "see", "ui", "logs", "debug", "sentry"}
 SERVER_CMDS = {"build", "test", "lint", "format", "docs", "sqlc", "watch"}
-LIVE_SUBS = {"status", "logs", "snapshots", "clusters",
+LIVE_SUBS = {"status", "logs", "sql", "snapshots", "clusters",
              "deployments", "releases", "machines", "sentry"}
 GUARDED_SUBS = {"deploy", "rollback"}
 
@@ -37,6 +37,8 @@ def resolve(op, args):
     elif op.startswith("server-live-"):
         sub = op[len("server-live-"):]
         if sub in LIVE_SUBS:
+            if sub == "sql" and "--write" in args:
+                return (None, 403, "refused: live sql --write must be run by a human in a terminal")
             return (["./build.sh", "server", "live", sub] + args, None, None)
         if sub in GUARDED_SUBS:
             if "--dry-run" in args:
