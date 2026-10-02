@@ -1316,9 +1316,9 @@ _testability_setting() {
     return 0
 }
 
-# Once XCTest prints its final "All tests" summary, xcodebuild sometimes never
-# exits (a known simulator teardown bug). Give it a short grace period, then
-# stop it and report the tests' own verdict.
+# Once XCTest prints its final "All tests" (or "Selected tests") summary,
+# xcodebuild sometimes never exits (a known simulator teardown bug). Give it a
+# short grace period, then stop it and report the tests' own verdict.
 _run_tests_with_watchdog() {
     local hard_timeout=$1
     shift
@@ -1333,9 +1333,9 @@ _run_tests_with_watchdog() {
     local summary_at=""
     local failed=false
     while kill -0 "$xc_pid" 2>/dev/null; do
-        if [[ -z "$summary_at" ]] && grep -q "Test Suite 'All tests'" "$log_file" 2>/dev/null; then
+        if [[ -z "$summary_at" ]] && grep -Eq "Test Suite '(All|Selected) tests'" "$log_file" 2>/dev/null; then
             summary_at=$SECONDS
-            grep -q "Test Suite 'All tests' failed" "$log_file" 2>/dev/null && failed=true
+            grep -Eq "Test Suite '(All|Selected) tests' failed" "$log_file" 2>/dev/null && failed=true
         fi
         if [[ -n "$summary_at" ]] && (( SECONDS - summary_at >= grace )); then
             echo "  xcodebuild stalled after the tests; stopping it."
@@ -2142,20 +2142,21 @@ do_unused() {
     _ensure_project
     local log
     log=$(mktemp)
-    local periphery_args=(scan)
+    local periphery_args=(scan --strict)
     if [[ -n "$PERIPHERY_CONFIG" ]]; then
         periphery_args+=(--config "$PERIPHERY_CONFIG")
     fi
     periphery_args+=(--project "$PROJECT_NAME.xcodeproj" --schemes "$SCHEME_NAME")
-    if (cd "$PROJECT_ROOT" && periphery "${periphery_args[@]}" > "$log" 2>&1); then
-        rm -f "$log"
-        echo "✓ Unused code: none"
-    else
-        echo "✗ Unused code scan failed:"
+    local exit_code
+    (cd "$PROJECT_ROOT" && periphery "${periphery_args[@]}" > "$log" 2>&1) && exit_code=0 || exit_code=$?
+    if [[ $exit_code -ne 0 ]] || grep -qiE "found [1-9]|\.swift:[0-9]+|is unused|are unused|warning:|error:" "$log"; then
+        echo "✗ Unused code found:"
         cat "$log"
         rm -f "$log"
         return 1
     fi
+    rm -f "$log"
+    echo "✓ Unused code: none"
 }
 
 do_analyze() {
@@ -2164,16 +2165,29 @@ do_analyze() {
     _ensure_project
     local log
     log=$(mktemp)
-    if (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" analyze -quiet > "$log" 2>&1); then
-        rm -f "$log"
-        echo "✓ Analyze passed"
-    else
+    local exit_code
+    (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
+      -destination "$_TARGET_DEST" analyze -quiet > "$log" 2>&1) && exit_code=0 || exit_code=$?
+    local findings
+    findings=$(grep -vi -e "appintentsmetadataprocessor" -e "metadata extraction skipped" -e '^\*\*.*SUCCEEDED\*\*$' "$log" | grep -v '^[[:space:]]*$' || true)
+    if [[ $exit_code -ne 0 ]]; then
         echo "✗ Analyze failed:"
-        cat "$log"
+        if [[ -n "$findings" ]]; then
+            echo "$findings"
+        else
+            echo "  (no analyzer output)"
+        fi
         rm -f "$log"
         return 1
     fi
+    if [[ -n "$findings" ]]; then
+        echo "✗ Analyze found warnings:"
+        echo "$findings"
+        rm -f "$log"
+        return 1
+    fi
+    rm -f "$log"
+    echo "✓ Analyze passed"
 }
 
 do_override_audit() {
@@ -2194,16 +2208,23 @@ do_override_audit() {
 }
 
 do_audit() {
-    do_lint || true
-    do_format_check || true
-    do_override_audit || true
+    local failed_steps=""
+    do_lint || failed_steps+=" lint"
+    do_format_check || failed_steps+=" format"
+    do_override_audit || failed_steps+=" overrides"
 
     if command -v periphery &>/dev/null; then
-        do_unused || true
+        do_unused || failed_steps+=" unused"
+    else
+        echo "ℹ Audit: periphery not installed, skipping unused-code scan (Install with: brew install periphery)"
     fi
 
-    do_analyze || true
+    do_analyze || failed_steps+=" analyze"
 
+    if [[ -n "$failed_steps" ]]; then
+        echo "✗ Audit failed:$failed_steps"
+        return 1
+    fi
     echo "✓ Audit complete"
 }
 
