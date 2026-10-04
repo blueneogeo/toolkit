@@ -85,10 +85,9 @@ _install_app() {
 
 # ── Unified launch ──────────────────────────────────────────────────
 
+# Brings Device Hub forward, where the booted simulator shows. A
+# devices:// link would open the simulator in a window of its own as well.
 _open_simulator_gui() {
-    if [[ -n "${SIM_ID:-}" ]]; then
-        open "devices://device/open?id=$SIM_ID" 2>/dev/null || true
-    fi
     open -a DeviceHub 2>/dev/null || open -a Simulator 2>/dev/null || true
 }
 

@@ -505,13 +505,32 @@ _fastlane_setup() {
     echo "provisioning profiles from the shared cert store."
     echo ""
 
-    if [[ -z "${FASTLANE_USER:-}" ]]; then
-        read -rp "  Apple ID: " FASTLANE_USER
-    fi
+    # The App Store Connect API key, when configured for uploads, signs match
+    # in too: Apple's Apple ID login breaks now and then, the key doesn't.
+    local key_path="${IOS_KEY_PATH:-$PROJECT_ROOT/AuthKey.p8}"
+    local api_key_json=""
+    if [[ -n "${IOS_KEY_ID:-}" && -n "${IOS_ISSUER_ID:-}" && -f "$key_path" ]]; then
+        api_key_json=$(mktemp -t match-api-key)
+        chmod 600 "$api_key_json"
+        trap 'rm -f "$api_key_json"' RETURN
+        local ruby_cmd=ruby
+        [[ "$bundle_cmd" == */* ]] && ruby_cmd="$(dirname "$bundle_cmd")/ruby"
+        "$ruby_cmd" -rjson -e \
+            'puts JSON.generate(key_id: ARGV[0], issuer_id: ARGV[1], key: File.read(ARGV[2]), in_house: false)' \
+            "$IOS_KEY_ID" "$IOS_ISSUER_ID" "$key_path" >"$api_key_json" || {
+            echo "✗ could not read the App Store Connect API key at $key_path"
+            return 1
+        }
+        echo "  Signing in with the App Store Connect API key ($IOS_KEY_ID)."
+    else
+        if [[ -z "${FASTLANE_USER:-}" ]]; then
+            read -rp "  Apple ID: " FASTLANE_USER
+        fi
 
-    if [[ -z "${FASTLANE_PASSWORD:-}" ]]; then
-        read -rsp "  Apple ID password: " FASTLANE_PASSWORD
-        echo ""
+        if [[ -z "${FASTLANE_PASSWORD:-}" ]]; then
+            read -rsp "  Apple ID password: " FASTLANE_PASSWORD
+            echo ""
+        fi
     fi
 
     if [[ -z "${MATCH_PASSWORD:-}" ]]; then
@@ -521,6 +540,7 @@ _fastlane_setup() {
 
     echo ""
     local -a match_args=(appstore)
+    [[ -n "$api_key_json" ]] && match_args+=(--api_key_path "$api_key_json")
     if [[ "${_MATCH_RENEW:-false}" == "true" ]]; then
         match_args+=(--force)
         echo "→ Renewing the App Store provisioning profile..."
@@ -528,8 +548,8 @@ _fastlane_setup() {
         echo "→ Syncing certificates..."
     fi
     MATCH_PASSWORD="$MATCH_PASSWORD" \
-        FASTLANE_USER="$FASTLANE_USER" \
-        FASTLANE_PASSWORD="$FASTLANE_PASSWORD" \
+        FASTLANE_USER="${FASTLANE_USER:-}" \
+        FASTLANE_PASSWORD="${FASTLANE_PASSWORD:-}" \
         $bundle_cmd exec fastlane match "${match_args[@]}"
 
     echo ""
@@ -2981,7 +3001,7 @@ _dispatch() {
     fi
 
     case "${1:-}" in
-        setup)    do_setup ;;
+        setup)    shift; do_setup "$@" ;;
         build)    do_build ;;
         clean)    do_clean ;;
         install)  shift; do_install "$@" ;;
