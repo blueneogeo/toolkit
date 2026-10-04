@@ -369,6 +369,43 @@ do_format() {
     fi
 }
 
+# Adds Go modules (module or module@version) to go.mod, or with "tidy"
+# tidies it. Adding doesn't tidy: a module the code doesn't import yet would
+# be dropped again. A module
+# that needs a newer Go than the project's is refused, since the Docker
+# image builds with the project's version.
+do_deps() {
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: ./build.sh server deps <module[@version]>..."
+        return 1
+    fi
+    _sandbox_go_env
+    local before after
+    before=$(grep -E '^go [0-9.]+' "$PROJECT_ROOT/go.mod")
+    cp "$PROJECT_ROOT/go.mod" "$PROJECT_ROOT/go.mod.bak"
+    cp "$PROJECT_ROOT/go.sum" "$PROJECT_ROOT/go.sum.bak"
+    local -a go_cmd=(go get "$@")
+    if [[ "$*" == "tidy" ]]; then
+        go_cmd=(go mod tidy)
+    fi
+    echo "→ ${go_cmd[*]}..."
+    if ! (cd "$PROJECT_ROOT" && "${go_cmd[@]}"); then
+        mv "$PROJECT_ROOT/go.mod.bak" "$PROJECT_ROOT/go.mod"
+        mv "$PROJECT_ROOT/go.sum.bak" "$PROJECT_ROOT/go.sum"
+        echo "✗ Adding dependencies failed"
+        return 1
+    fi
+    after=$(grep -E '^go [0-9.]+' "$PROJECT_ROOT/go.mod")
+    if [[ "$before" != "$after" ]]; then
+        mv "$PROJECT_ROOT/go.mod.bak" "$PROJECT_ROOT/go.mod"
+        mv "$PROJECT_ROOT/go.sum.bak" "$PROJECT_ROOT/go.sum"
+        echo "✗ $* needs '${after}' but the project is on '${before}'; pick an older version (module@vX.Y.Z)."
+        return 1
+    fi
+    rm -f "$PROJECT_ROOT/go.mod.bak" "$PROJECT_ROOT/go.sum.bak"
+    echo "✓ go.mod updated — once the code imports a new module, run './build.sh server deps tidy'"
+}
+
 do_sqlc() {
     _require_cmd sqlc "Install with: brew install sqlc"
     local log
@@ -672,6 +709,7 @@ Usage: ./build.sh server [--server] <command> (--server accepted in any position
     doctor       Check local server build prerequisites
     docs         Generate OpenAPI/Swagger spec from handler annotations
     sqlc         Regenerate sqlc code from db/queries/*.sql
+    deps <mod>   Add Go modules (module[@version]) to go.mod; 'deps tidy' tidies it
     migrate up              Run all pending up migrations
     migrate down            Run 1 down migration (default)
     migrate down N          Run N down migrations
@@ -748,6 +786,7 @@ _dispatch() {
         doctor)       do_doctor ;;
         docs)         do_docs ;;
         sqlc)         do_sqlc ;;
+        deps)         shift; do_deps "$@" ;;
         migrate)      shift; do_migrate "$@" ;;
         sql)          shift; do_sql "$@" ;;
         apns-setup)   do_apns_setup ;;

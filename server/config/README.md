@@ -57,10 +57,18 @@ Go module path from `go.mod`, `cmd/server` entry point. Overridable via
 
 `setup` · `build` · `clean` · `start` · `stop` · `status` · `logs [N\|tail]` · `debug` ·
 `watch` · `test [N] [service\|emails\|local\|live]` · `lint` · `format` · `doctor` ·
-`docs` · `migrate up\|down` · `sql <query>` · `apns-setup` · `email-setup` ·
+`docs` · `migrate up\|down` · `sql <query>` · `sqlc` · `deps <module[@version]>\|tidy` · `apns-setup` · `email-setup` ·
 `live status` · `live logs [N\|tail]` · `live deploy [--dry-run] [--strategy] [--force] <text>` ·
 `live rollback [--dry-run] [--force]` · `live snapshots` · `live deployments` · `live releases` ·
-`live machines` · `live setup` · `live ci-setup` · `live sentry` · `[--server]`
+`live machines` · `live sql [--write [--force]] <sql>` · `live setup` · `live ci-setup` · `live sentry` · `[--server]`
+
+- `deps <module[@version]>` runs `go get` without tidying (a module the code doesn't
+  import yet would be dropped again); `deps tidy` runs `go mod tidy` once it does. Both
+  restore `go.mod`/`go.sum` and refuse when the change would raise the `go` directive,
+  since the Docker image builds with the project's Go version.
+- `live sql` runs SQL on the live database through a temporary `fly mpg proxy`, as one
+  transaction that stops at the first error; read-only unless `--write`, which asks first
+  (`--force` skips that) and takes a database backup.
 
 Breaching commands auto-forward to the user-launched relay when `SCODE_SANDBOXED` is set; pass `--server` explicitly outside sandboxes. Live guarded ops (`deploy`, `rollback`) via the relay need `--dry-run`.
 

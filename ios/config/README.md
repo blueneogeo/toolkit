@@ -36,6 +36,10 @@ Re-runs are no-ops; `./build.sh setup --force` regenerates. Add a `project.yml`
 
 Everything lives in `<project>/build.properties` (see
 `config/build.properties.example` for the full documented surface).
+Personal values that must stay out of git (a test account's login) go in
+`<project>/build.properties.local`, loaded after it when present; keep that file
+gitignored. Any `SCRIPT_ENV_<NAME>` from either file, or from the shell, reaches
+debug scripts on the simulator as the environment variable `<NAME>`.
 
 External services (Sentry, upload, e2e, server) are configured idempotently via
 `./build.sh configure` — already-configured items are skipped, non-interactive runs
@@ -153,9 +157,9 @@ Notes:
 
 ## Commands
 
-`setup [--force]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target] [--quiet|-q]` · `uninstall [target]` · `watch [target] [mode]` ·
-`test [filter] [timeout]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
-`logs [--cat] [--level] [N|tail]` · `debug [--cat] [--level] [--script <names>]` · `e2e` · `e2e-run` ·
+`setup [--force] [--renew-profiles]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target] [--quiet|-q]` · `uninstall [target]` · `watch [target] [mode]` ·
+`test [filter] [timeout] [--no-build]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
+`logs [--cat] [--level] [N|tail]` · `debug [target] [--cat] [--level] [--script <names>] [--no-build]` · `signin` · `signout` · `e2e` · `e2e-run` ·
 `screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` · `ui <cmd>` ·
 `profile [target] [--script] [--seconds] [--render] [--template] [--name]` ·
 `upload [--force] <text>` · `sentry <cmd>` · `[--server]` · `[--config <name>]`
@@ -163,7 +167,16 @@ Notes:
 `[target]` = `device` | `simulator` | `<name|udid>`; no target prefers a connected physical phone and falls back to the simulator.
 
 `device` prefix or `--device <name|udid>` targets a specific physical device.
-`install`, `uninstall`, and `watch` take `iphone` or `simulator` as an explicit target;
+`install`, `uninstall`, `watch` and `debug` take `device` or `simulator` as an explicit target;
 with no target they prefer a connected phone and fall back to the simulator.
+
+- `setup --renew-profiles` renews the App Store provisioning profile (fastlane match
+  `--force`), needed after adding a capability such as Associated Domains.
+- `debug --no-build` relaunches the installed simulator app instead of rebuilding. On the
+  simulator, `debug` reads the simulator's own log stream at debug level and writes the
+  script marker only once that stream is listening, so a script that ends at once is
+  still heard and the session stops on `DEBUG_SESSION_ENDED`.
+- `signin` / `signout` run the project's `sign_in` / `sign_out` debug scripts on the
+  simulator without rebuilding (`debug simulator --no-build --script sign_in`).
 `IOS_DEVICE=<name|udid>` selects which connected iPhone to use when several are present
 (a preference, not a force). Breaching commands auto-forward to the user-launched relay when `SCODE_SANDBOXED` is set; pass `--server` explicitly outside sandboxes. See `./build.sh` (no args) for full usage.

@@ -63,6 +63,12 @@ _load_config() {
         source "$PROJECT_ROOT/build.properties"
         set +a
     fi
+    # Personal values that stay out of git, such as a test account's login.
+    if [[ -f "$PROJECT_ROOT/build.properties.local" ]]; then
+        set -a
+        source "$PROJECT_ROOT/build.properties.local"
+        set +a
+    fi
 
     # Offline-first defaults: nothing that requires configuration is on.
     TOOLKIT_SERVER_ENABLED="${TOOLKIT_SERVER_ENABLED:-false}"
@@ -514,11 +520,17 @@ _fastlane_setup() {
     fi
 
     echo ""
-    echo "→ Syncing certificates..."
+    local -a match_args=(appstore)
+    if [[ "${_MATCH_RENEW:-false}" == "true" ]]; then
+        match_args+=(--force)
+        echo "→ Renewing the App Store provisioning profile..."
+    else
+        echo "→ Syncing certificates..."
+    fi
     MATCH_PASSWORD="$MATCH_PASSWORD" \
         FASTLANE_USER="$FASTLANE_USER" \
         FASTLANE_PASSWORD="$FASTLANE_PASSWORD" \
-        $bundle_cmd exec fastlane match appstore
+        $bundle_cmd exec fastlane match "${match_args[@]}"
 
     echo ""
     echo "  ✓ Certificates synced"
@@ -528,8 +540,12 @@ _fastlane_setup() {
 
 do_setup() {
     local force=false
+    _MATCH_RENEW=false
     for arg in "$@"; do
         [[ "$arg" == "--force" ]] && force=true
+        # A new capability (e.g. Associated Domains) needs a new App Store
+        # profile; match only makes one when asked to renew.
+        [[ "$arg" == "--renew-profiles" ]] && _MATCH_RENEW=true
     done
     _detect_project_config
     if [[ ! -f "$PROJECT_ROOT/build.properties" ]]; then
@@ -2644,11 +2660,13 @@ _ios_debug() {
     local cat_filter=""
     local level_filter=""
     local script_names=""
+    local no_build=false
     while [[ "${1:-}" == --* ]]; do
         case "$1" in
             --cat) cat_filter="${2:-}"; shift 2 ;;
             --level) level_filter="${2:-}"; shift 2 ;;
             --script) script_names="${2:-}"; shift 2 ;;
+            --no-build) no_build=true; shift ;;
             *) echo "⚠ Unknown flag: $1" >&2; shift ;;
         esac
     done
@@ -2665,6 +2683,12 @@ _ios_debug() {
         # Simulator: inject names at launch via SIMCTL_CHILD_ so config.swift stays untouched
         # and subsequent script runs reuse the incremental build (no rebuild).
         export SIMCTL_CHILD_TURN_DEBUG_SCRIPT_NAMES="$script_names"
+        # SCRIPT_ENV_<NAME> (from build.properties.local or the shell) reaches
+        # the scripts as <NAME>, e.g. a test account's login.
+        local script_var
+        for script_var in $(compgen -v SCRIPT_ENV_); do
+            export "SIMCTL_CHILD_${script_var#SCRIPT_ENV_}=${!script_var}"
+        done
     fi
     case "$_TARGET_SDK" in
         iphoneos)
@@ -2738,9 +2762,10 @@ EOF
             ;;
 
         iphonesimulator)
-            do_install simulator
-            if [[ -n "$script_names" ]]; then
-                _write_scriptor_marker
+            if $no_build; then
+                do_launch simulator
+            else
+                do_install simulator
             fi
             echo ""
             if [[ "$cat_filter" == "all" ]]; then
@@ -2755,8 +2780,14 @@ EOF
             local fifo pipe_pid
             fifo=$(mktemp -u)
             mkfifo "$fifo"
-            log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null > "$fifo" &
+            # The Mac's own log stream doesn't carry simulator apps.
+            xcrun simctl spawn "$SIM_ID" log stream --level debug --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null > "$fifo" &
             pipe_pid=$!
+            # Scripts start only once the stream is listening, so a quick one
+            # can't end the session before it is heard.
+            if [[ -n "$script_names" ]]; then
+                ( sleep 1; _write_scriptor_marker ) &
+            fi
             while IFS= read -r line; do
                 local show=false
                 if [[ "$cat_filter" == "all" ]]; then
@@ -2764,7 +2795,7 @@ EOF
                 elif [[ -n "$cat_filter" ]]; then
                     [[ "$line" == *"[${cat_filter}]"* ]] && show=true
                 else
-                    [[ "$line" == *"[turn]"* ]] && show=true
+                    [[ "$line" == *"[turn]"* || "$line" == *":turn]"* ]] && show=true
                 fi
                 [[ "$line" == *"DEBUG_SESSION_ENDED"* ]] && show=true
 
@@ -2812,6 +2843,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
 
   Local dev:
     setup              First-time setup: config + generate + build + LSP config (sim only)
+                       --renew-profiles: renew the App Store profile (after adding a capability)
     update-toolkit     Update the toolkit submodule to the latest version
     configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
     build              Lint → format → incremental build
@@ -2848,7 +2880,10 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     doctor             Check local build prerequisites
     logs [--cat <cat>] [--level <level>] [N]  Show last N lines (default 10)
     logs [--cat <cat>] [--level <level>] tail  Stream live app logs
-    debug [--cat <cat>] [--level <level>]  Build, launch, and trace logs (auto-stop on background)
+    debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build]
+                         Build (or with --no-build, just relaunch), launch, and trace logs (auto-stop on background)
+    signin               Sign the simulator in with SCRIPT_ENV_TURN_LOGIN_EMAIL / _CODE from build.properties.local (runs the sign_in script)
+    signout              Sign the simulator out (runs the sign_out script)
 
   Online (enable via setup / build.properties):
     e2e              Run UI tests against a configured server (TOOLKIT_E2E_ENABLED)
@@ -2974,6 +3009,8 @@ _dispatch() {
         logs)     shift; _ios_logs "$@" ;;
         profile)  shift; do_profile "$@" ;;
         debug)    shift; _ios_debug "$@" ; exit 0 ;;
+        signin)   _ios_debug simulator --no-build --script sign_in ; exit 0 ;;
+        signout)  _ios_debug simulator --no-build --script sign_out ; exit 0 ;;
         *)        usage ;;
     esac
 }
