@@ -430,6 +430,16 @@ _ensure_project() {
 
 # ── Unified build ───────────────────────────────────────────────────
 
+# The App Store Connect API key, when configured, lets automatic signing
+# fetch a new profile (after a capability is added) without an Apple
+# account signed in to Xcode.
+_provisioning_auth_args() {
+    local key_path="${IOS_KEY_PATH:-$PROJECT_ROOT/AuthKey.p8}"
+    [[ -n "${IOS_KEY_ID:-}" && -n "${IOS_ISSUER_ID:-}" && -f "$key_path" ]] || return 0
+    [[ "$key_path" == /* ]] || key_path="$PWD/$key_path"
+    echo "-authenticationKeyPath $key_path -authenticationKeyID $IOS_KEY_ID -authenticationKeyIssuerID $IOS_ISSUER_ID"
+}
+
 _do_build() {
     local action="${1:-build}"
     local cfg
@@ -445,7 +455,7 @@ _do_build() {
     logfile=$(mktemp)
     if (cd "$PROJECT_ROOT" && xcodebuild -quiet -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
       -destination "$_TARGET_DEST" -configuration "$cfg" $action $_BUILD_EXTRA \
-      -allowProvisioningUpdates \
+      -allowProvisioningUpdates $(_provisioning_auth_args) \
       > "$logfile" 2>&1); then
         xcode-build-server parse -a < "$logfile" 2>/dev/null || true
         rm -f "$logfile"

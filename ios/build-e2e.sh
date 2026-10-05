@@ -72,7 +72,7 @@ do_e2e() {
 
     local provisioning_args=""
     if [[ "$_TARGET_SDK" == "iphoneos" ]]; then
-        provisioning_args="-allowProvisioningUpdates"
+        provisioning_args="-allowProvisioningUpdates $(_provisioning_auth_args)"
     fi
 
     echo "Testing ${PROJECT_NAME} e2e on $_TARGET_NAME ($_TARGET_SDK)."
