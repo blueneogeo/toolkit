@@ -299,6 +299,7 @@ _pre_deploy_check() {
         failed=1
     fi
 
+    git -C "$PROJECT_ROOT" update-index -q --refresh >/dev/null 2>&1
     if ! git -C "$PROJECT_ROOT" diff-index --quiet HEAD --; then
         echo "  ✗ uncommitted changes — commit or stash before deploying"
         echo "    $(git -C "$PROJECT_ROOT" diff-index --name-status HEAD -- | head -5)"

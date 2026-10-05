@@ -64,6 +64,7 @@ do_upload() {
     fi
     echo "  ✓ doctor passed"
 
+    git -C "$PROJECT_ROOT" update-index -q --refresh >/dev/null 2>&1
     if ! git -C "$PROJECT_ROOT" diff-index --quiet HEAD --; then
         echo "  ✗ uncommitted changes — commit or stash before deploying"
         git -C "$PROJECT_ROOT" diff-index --name-status HEAD -- | head -5 | sed 's/^/    /'
