@@ -100,11 +100,11 @@ _launch_app() {
                 xcrun simctl boot "$SIM_ID"
             fi
             _install_app
-            if [[ $# -gt 0 ]]; then
-                xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" "$@" > /dev/null
-            else
-                xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" > /dev/null
-            fi
+            # IOS_LAUNCH_ARGS adds launch arguments of the project's own
+            # (e.g. one that starts the app muted) to every simulator launch.
+            local extra=()
+            read -r -a extra <<< "${IOS_LAUNCH_ARGS:-}"
+            xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" "$@" ${extra[@]+"${extra[@]}"} > /dev/null
             if [[ "${_QUIET_INSTALL:-false}" != "true" ]]; then
                 _open_simulator_gui
             fi

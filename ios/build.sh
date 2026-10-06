@@ -3054,6 +3054,7 @@ Options:
                                Example: ./build.sh ios --config profile install device
 
     IOS_DEVICE=<name|udid>     Environment variable fallback for --device.
+    IOS_LAUNCH_ARGS="<args>"   Extra launch arguments for every simulator launch.
                                Set once to always target the same device.
                                Example: export IOS_DEVICE="iPhone 15"
 EOF
