@@ -321,10 +321,29 @@ _select_target() {
             fi
             ;;
         *)
-            _DEVICE_SELECTOR="$requested"
-            _set_mode_device_forced
+            if _use_named_simulator "$requested"; then
+                _set_mode_sim
+                _validate_sim_target
+            else
+                _DEVICE_SELECTOR="$requested"
+                _set_mode_device_forced
+            fi
             ;;
     esac
+}
+
+# A target that is an available simulator's exact name or UDID (e.g. one made
+# with `simulator create`) selects that simulator instead of a phone.
+_use_named_simulator() {
+    local requested="$1" line udid
+    line=$(xcrun simctl list devices available 2>/dev/null | grep -F -e "    $requested (" -e "($requested)" | head -1 || true)
+    [[ -z "$line" ]] && return 1
+    udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}' | head -1)
+    [[ -z "$udid" ]] && return 1
+    SIM_ID="$udid"
+    SIM_NAME=$(echo "$line" | sed -E 's/^[[:space:]]*//' | sed -E 's/ \([A-F0-9-]+\) \(.*$//')
+    SIM_DEST="platform=iOS Simulator,id=${SIM_ID}"
+    return 0
 }
 
 # Resolves the capture target (screenshot/see) to _CAPTURE_UDID. Mirrors
@@ -359,6 +378,10 @@ _select_capture_target() {
             fi
             ;;
         *)
+            if _use_named_simulator "$requested"; then
+                _CAPTURE_UDID="$SIM_ID"
+                return 0
+            fi
             _capture_require_tools
             _capture_resolve_device "$requested" || return 1
             _CAPTURE_IS_DEVICE=true
@@ -835,7 +858,7 @@ do_screenshot() {
                 name="${2:-}"
                 ;;
             *)
-                if _selector_matches_device "$1"; then
+                if _use_named_simulator "$1" || _selector_matches_device "$1"; then
                     target="$1"
                     name="${2:-}"
                 else
@@ -858,8 +881,13 @@ do_screenshot() {
 do_screenshots_collect() {
     _detect_project_config
     _check_core_tools
+    [[ "${1:-}" == "collect" ]] && shift
     local sim_id
-    sim_id=$(_booted_sim_id)
+    if [[ -n "${1:-}" ]] && _use_named_simulator "$1"; then
+        sim_id="$SIM_ID"
+    else
+        sim_id=$(_booted_sim_id)
+    fi
     if [[ -z "$sim_id" ]]; then
         echo "✗ No booted simulator."
         return 1
@@ -946,7 +974,7 @@ Options:
     --no-shot          Skip the automatic screenshot after the action
     --delay <ms>       Settle time before the screenshot (default: 700)
     --device, -d <name|udid>
-                       Target a specific simulator by name substring or UDID.
+                       Target a specific simulator by its exact name or UDID.
                        Defaults to the booted simulator.
 
 Examples:
@@ -966,6 +994,14 @@ _ui_require_baguette() {
 
 _ui_sim_id() {
     local sim_id
+    if [[ -n "$_DEVICE_SELECTOR" ]]; then
+        if ! _use_named_simulator "$_DEVICE_SELECTOR"; then
+            echo "✗ No simulator called '$_DEVICE_SELECTOR'."
+            return 1
+        fi
+        echo "$SIM_ID"
+        return 0
+    fi
     sim_id=$(_booted_sim_id)
     if [[ -z "$sim_id" ]]; then
         echo "✗ No booted simulator. Run: ./build.sh ios install"
@@ -1090,6 +1126,80 @@ _ui_bag_run() {
         echo "✗ baguette $verb rejected: $out"
         return 1
     fi
+}
+
+# ── Simulators ──────────────────────────────────────────────────────
+
+_SIM_TEXT_SIZES="extra-small small medium large extra-large extra-extra-large extra-extra-extra-large accessibility-medium accessibility-large accessibility-extra-large accessibility-extra-extra-large accessibility-extra-extra-extra-large"
+
+_simulator_usage() {
+    cat <<EOF
+Usage: ./build.sh ios simulator <command>
+
+  create <model>       Make a simulator of that model (e.g. "iPhone 13 mini") on the
+                       newest iOS runtime, unless one exists; prints its UDID. Use its
+                       name as the target of install, debug, screenshot and the like.
+  text-size [size]     Set the simulator's text size (Dynamic Type); no size prints
+                       the current one. --device <name|udid> picks the simulator,
+                       else the booted one. large is the default. Sizes:
+                       $_SIM_TEXT_SIZES
+EOF
+}
+
+do_simulator() {
+    case "${1:-}" in
+        create)
+            shift
+            local model="${1:-}"
+            if [[ -z "$model" ]]; then
+                echo "✗ simulator create needs a model, e.g. \"iPhone 13 mini\""
+                return 1
+            fi
+            local existing
+            existing=$(xcrun simctl list devices available | grep -F "    $model (" | grep -oE '[A-F0-9-]{36}' | head -1 || true)
+            if [[ -n "$existing" ]]; then
+                echo "✓ $model exists"
+                echo "$existing"
+                return 0
+            fi
+            local device_type runtime udid
+            device_type=$(xcrun simctl list devicetypes | grep -F "$model (" | grep -oE 'com\.apple\.CoreSimulator\.SimDeviceType\.[A-Za-z0-9-]+' | head -1 || true)
+            if [[ -z "$device_type" ]]; then
+                echo "✗ No simulator model called \"$model\". See: xcrun simctl list devicetypes"
+                return 1
+            fi
+            runtime=$(xcrun simctl list runtimes available | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+' | tail -1 || true)
+            if [[ -z "$runtime" ]]; then
+                echo "✗ No iOS simulator runtime installed."
+                return 1
+            fi
+            if ! udid=$(xcrun simctl create "$model" "$device_type" "$runtime" 2>&1); then
+                echo "✗ Could not make $model: $udid"
+                return 1
+            fi
+            echo "✓ Made $model"
+            echo "$udid"
+            ;;
+        text-size)
+            shift
+            local sim
+            sim=$(_ui_sim_id) || { echo "$sim"; return 1; }
+            if [[ -z "${1:-}" ]]; then
+                xcrun simctl ui "$sim" content_size
+                return 0
+            fi
+            if [[ " $_SIM_TEXT_SIZES " != *" $1 "* ]]; then
+                echo "✗ Unknown text size \"$1\"."
+                _simulator_usage
+                return 1
+            fi
+            xcrun simctl ui "$sim" content_size "$1"
+            echo "✓ Text size $1"
+            ;;
+        *)
+            _simulator_usage
+            ;;
+    esac
 }
 
 do_ui() {
@@ -1280,7 +1390,7 @@ do_watch() {
                 mode="${2:-swift}"
                 ;;
             *)
-                if _selector_matches_device "$1"; then
+                if _use_named_simulator "$1" || _selector_matches_device "$1"; then
                     target="$1"
                     mode="${2:-swift}"
                 else
@@ -2887,7 +2997,12 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
                        ios/build/screenshots/ (no build/launch). A lone argument is
                        the screenshot name, unless exactly one connected phone
                        matches it — then it is that phone's target.
-    screenshots collect  Copy scripted in-app screenshots out of the sim container into ios/build/screenshots/
+    screenshots collect [simulator]
+                       Copy scripted in-app screenshots out of the sim container into
+                       ios/build/screenshots/ (a simulator's name or UDID picks which one)
+    simulator <create <model>|text-size [size]>
+                       Make a simulator of another model (e.g. "iPhone 13 mini"), or set
+                       the booted simulator's text size (Dynamic Type).
     profile [target] [--script <names>] [--seconds N] [--render] [--template <name>] [--name <label>]
                        Record an Instruments trace (Time Profiler by default) of the app on
                        the connected phone or booted simulator and print the frame rate and
@@ -3020,6 +3135,7 @@ _dispatch() {
         screenshots) shift; do_screenshots_collect "$@" ;;
         see) shift; do_see "$@" ;;
         ui) shift; do_ui "$@" ;;
+        simulator) shift; do_simulator "$@" ;;
         uninstall) shift; do_uninstall "$@" ;;
         watch)    shift; do_watch "$@" ;;
         test)     shift; do_test "$@" ;;
