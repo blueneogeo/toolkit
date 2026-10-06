@@ -1489,7 +1489,8 @@ _run_tests_with_watchdog() {
     local summary_at=""
     local failed=false
     while kill -0 "$xc_pid" 2>/dev/null; do
-        if [[ -z "$summary_at" ]] && grep -Eq "Test Suite '(All|Selected) tests'" "$log_file" 2>/dev/null; then
+        # The summary, not the "started" line the run opens with.
+        if [[ -z "$summary_at" ]] && grep -Eq "Test Suite '(All|Selected) tests' (passed|failed)" "$log_file" 2>/dev/null; then
             summary_at=$SECONDS
             grep -Eq "Test Suite '(All|Selected) tests' failed" "$log_file" 2>/dev/null && failed=true
         fi
