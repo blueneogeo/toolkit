@@ -992,19 +992,17 @@ _ui_require_baguette() {
     fi
 }
 
+# UI driving is simulator only: a selector naming a phone (as IOS_DEVICE
+# usually does) is not for it, so the booted simulator is used instead.
 _ui_sim_id() {
     local sim_id
-    if [[ -n "$_DEVICE_SELECTOR" ]]; then
-        if ! _use_named_simulator "$_DEVICE_SELECTOR"; then
-            echo "✗ No simulator called '$_DEVICE_SELECTOR'."
-            return 1
-        fi
+    if [[ -n "$_DEVICE_SELECTOR" ]] && _use_named_simulator "$_DEVICE_SELECTOR"; then
         echo "$SIM_ID"
         return 0
     fi
     sim_id=$(_booted_sim_id)
     if [[ -z "$sim_id" ]]; then
-        echo "✗ No booted simulator. Run: ./build.sh ios install"
+        echo >&2 "✗ No booted simulator. Run: ./build.sh ios install simulator"
         return 1
     fi
     echo "$sim_id"
