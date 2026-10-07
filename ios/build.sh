@@ -2683,10 +2683,10 @@ _ios_logs() {
                 iphonesimulator)
                     if [[ -n "$cat_filter" ]]; then
                         echo "→ Streaming sim logs (filter: $cat_filter, Ctrl-C to stop)..."
-                        log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /'; done | _level_grep "$level_filter"
                     else
                         echo "→ Streaming sim logs (Ctrl-C to stop)..."
-                        log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | while IFS= read -r line; do echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | while IFS= read -r line; do echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /'; done | _level_grep "$level_filter"
                     fi
                     ;;
             esac
@@ -2728,9 +2728,9 @@ _ios_logs() {
                     fi
                     echo "→ ${desc}:"
                     if [[ -n "$cat_filter" ]]; then
-                        log show --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 2m 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     else
-                        log show --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 2m 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     fi
                     ;;
             esac
@@ -2828,6 +2828,10 @@ _ios_debug() {
         for script_var in $(compgen -v SCRIPT_ENV_); do
             export "SIMCTL_CHILD_${script_var#SCRIPT_ENV_}=${!script_var}"
         done
+        # `signin <email> <code>` wins over the file's account.
+        if [[ -n "${_SIGNIN_EMAIL:-}" ]]; then
+            export SIMCTL_CHILD_TURN_LOGIN_EMAIL="$_SIGNIN_EMAIL" SIMCTL_CHILD_TURN_LOGIN_CODE="$_SIGNIN_CODE"
+        fi
     fi
     case "$_TARGET_SDK" in
         iphoneos)
@@ -3026,7 +3030,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     logs [--cat <cat>] [--level <level>] tail  Stream live app logs
     debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build]
                          Build (or with --no-build, just relaunch), launch, and trace logs (auto-stop on background)
-    signin               Sign the simulator in with SCRIPT_ENV_TURN_LOGIN_EMAIL / _CODE from build.properties.local (runs the sign_in script)
+    signin [email code]  Sign the simulator in with SCRIPT_ENV_TURN_LOGIN_EMAIL / _CODE from build.properties.local, or with the given account and its fixed code (runs the sign_in script)
     signout              Sign the simulator out (runs the sign_out script)
 
   Online (enable via setup / build.properties):
@@ -3155,7 +3159,14 @@ _dispatch() {
         logs)     shift; _ios_logs "$@" ;;
         profile)  shift; do_profile "$@" ;;
         debug)    shift; _ios_debug "$@" ; exit 0 ;;
-        signin)   _ios_debug simulator --no-build --script sign_in ; exit 0 ;;
+        signin)
+            shift
+            # Another account than build.properties.local's: signin <email> <code>.
+            if [[ $# -ge 2 ]]; then
+                _SIGNIN_EMAIL="$1"
+                _SIGNIN_CODE="$2"
+            fi
+            _ios_debug simulator --no-build --script sign_in ; exit 0 ;;
         signout)  _ios_debug simulator --no-build --script sign_out ; exit 0 ;;
         *)        usage ;;
     esac
