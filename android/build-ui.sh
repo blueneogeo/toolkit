@@ -1,5 +1,5 @@
 #!/bin/bash
-# android-toolkit/build-ui.sh — drive and read the screen, mirroring `ios ui`
+# android-toolkit/build-ui.sh: drive and read the screen, mirroring `ios ui`
 # Sourced by build.sh. Coordinates are dp; adb takes pixels, so every
 # number is scaled by the device's density (480 dpi is 3 px per dp).
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# android-toolkit/build-device.sh — picking the device, screenshots, see
+# android-toolkit/build-device.sh: picking the device, screenshots, see
 # Sourced by build.sh. Sets SERIAL for the commands that follow.
 
 _require_adb() {
@@ -18,16 +18,27 @@ _is_emulator_serial() {
     [[ "$1" == emulator-* ]]
 }
 
+# Serials of running emulators whose AVD has this name.
+_serials_of_avd() {
+    local serial
+    for serial in $(_connected_serials | grep '^emulator-' || true); do
+        if [[ "$("$ADB" -s "$serial" emu avd name 2>/dev/null | head -1 | tr -d '\r')" == "$1" ]]; then
+            echo "$serial"
+        fi
+    done
+}
+
 # True when the argument names something to capture from rather than a file name.
 _is_target_word() {
     local word="$1"
     case "$word" in
-        emulator|device|auto) return 0 ;;
+        emulator|simulator|device|auto) return 0 ;;
     esac
-    _connected_serials | grep -qxF "$word"
+    _connected_serials | grep -qxF "$word" || [[ -n "$(_serials_of_avd "$word")" ]]
 }
 
-# Resolves a target (emulator | device | <serial> | empty) to SERIAL.
+# Resolves a target (emulator | device | <serial> | <avd name> | empty) to SERIAL.
+# simulator means emulator, for scripts written for iOS.
 # Empty: the selector if one is set, else the running emulator, else the one phone.
 _select_android_target() {
     local target="${1:-}"
@@ -41,7 +52,7 @@ _select_android_target() {
     phones=$(grep -v '^emulator-' <<<"$serials" || true)
 
     case "$target" in
-        emulator)
+        emulator|simulator)
             _pick_one "$emulators" "emulator" "Run: ./build.sh android emulator start" ;;
         device)
             _pick_one "$phones" "phone" "Connect a phone with USB debugging on." ;;
@@ -56,10 +67,14 @@ _select_android_target() {
             fi
             ;;
         *)
+            local by_avd
+            by_avd=$(_serials_of_avd "$target")
             if grep -qxF "$target" <<<"$serials"; then
                 SERIAL="$target"
+            elif [[ -n "$by_avd" ]]; then
+                _pick_one "$by_avd" "emulator of $target" ""
             else
-                echo "✗ No connected device with serial '$target'. Connected:"
+                echo "✗ No connected device or running AVD named '$target'. Connected:"
                 "$ADB" devices | tail -n +2
                 return 1
             fi
@@ -160,4 +175,38 @@ do_see() {
         echo ""
         echo "─ For fine detail: ./build.sh android see --focus \"<focused question about a region or element>\""
     fi
+}
+
+# Copies the PNGs that debug scripts saved in the app's files/DebugScreenshots.
+# Debuggable builds are read with run-as; others write to the app's external
+# files folder, which adb can pull.
+do_screenshots_collect() {
+    [[ "${1:-}" == "collect" ]] && shift
+    _lock_take emulator || return 1
+    _select_android_target "${1:-}" || return 1
+    local app_id
+    app_id=$(_app_id) || return 1
+    local dest="${PROJECT_ROOT}/build/screenshots" tmp
+    mkdir -p "$dest"
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/x"
+    "$ADB" -s "$SERIAL" exec-out "run-as $app_id sh -c 'cd files/DebugScreenshots 2>/dev/null && tar -cf - *.png 2>/dev/null'" > "$tmp/shots.tar" 2>/dev/null || true
+    if [[ -s "$tmp/shots.tar" ]]; then
+        tar -xf "$tmp/shots.tar" -C "$tmp/x" 2>/dev/null || true
+    else
+        "$ADB" -s "$SERIAL" pull "/sdcard/Android/data/$app_id/files/DebugScreenshots" "$tmp/x" >/dev/null 2>&1 || true
+    fi
+    local count=0 p
+    while IFS= read -r p; do
+        [[ -n "$p" ]] || continue
+        cp "$p" "$dest/"
+        echo "$(cd "$dest" && pwd)/$(basename "$p")"
+        count=$((count + 1))
+    done < <(find "$tmp/x" -name '*.png' -type f | sort)
+    rm -rf "$tmp"
+    if [[ $count -eq 0 ]]; then
+        echo "⚠ No scripted screenshots found in the app's files."
+        return 0
+    fi
+    echo "✓ Collected $count screenshot(s)"
 }

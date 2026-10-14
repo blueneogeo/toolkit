@@ -1,5 +1,5 @@
 #!/bin/bash
-# android-toolkit/build-emulator.sh — starting and stopping the emulator
+# android-toolkit/build-emulator.sh: starting and stopping the emulator
 # Sourced by build.sh.
 
 _emulator_usage() {
