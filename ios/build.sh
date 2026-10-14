@@ -38,6 +38,7 @@ source "$SCRIPT_DIR/build-lifecycle.sh"
 source "$SCRIPT_DIR/build-e2e.sh"
 source "$SCRIPT_DIR/build-upload.sh"
 source "$SCRIPT_DIR/build-profile.sh"
+source "$SCRIPT_DIR/build-record.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/ios.pid"
 TEST_TIMEOUT=120
@@ -3016,6 +3017,10 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     see [target] [--focus "<q>"]
                        Capture the phone/simulator screen and describe it with the
                        vision model (--focus optional)
+    record [simulator] [name] [--seconds N] [--script <names>] [--frames <fps>]
+                       Record the simulator's screen to ios/build/recordings/<name>.mp4;
+                       --script films debug scripts from launch, --frames cuts frames
+                       and contact sheets ('./build.sh ios record --help'; simulator only)
     ui <command>       Drive the simulator UI (baguette): tap | swipe | type | press | describe
                        ('./build.sh ios ui' shows the full help; simulator only)
     test [filter] [timeout] [--no-build]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT); --no-build skips the build
@@ -3138,6 +3143,7 @@ _dispatch() {
         screenshot) shift; do_screenshot "$@" ;;
         screenshots) shift; do_screenshots_collect "$@" ;;
         see) shift; do_see "$@" ;;
+        record) shift; do_record "$@" ;;
         ui) shift; do_ui "$@" ;;
         simulator) shift; do_simulator "$@" ;;
         uninstall) shift; do_uninstall "$@" ;;

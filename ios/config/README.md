@@ -105,6 +105,13 @@ Capture and inspect the app's UI on the simulator:
   model; `--focus` optional (defaults to a broad description plus a footer nudging
   toward focused follow-ups).
 
+- `record [simulator] [name] [--seconds N] [--script <names>] [--frames <fps>]`: records
+  the simulator's screen to `build/recordings/<name>.mp4` (simulator only). `--script`
+  relaunches the app running those debug scripts as the recording starts, so a scripted
+  interaction is filmed from its first frame. `--frames` also cuts the video into
+  `build/recordings/<name>/frame_NNN.png` and contact sheets of 48 frames
+  (`sheet_NN.png`), to judge an animation frame by frame. Needs `ffmpeg` for `--frames`.
+
 `see` composes the shared `vision` command (see the monorepo `README.md`), which reads
 `TOOLKIT_MODEL_API_KEY` / `TOOLKIT_MODEL_BASE_URL` / `TOOLKIT_VISION_MODEL` from the
 environment. Images are sent at full resolution by default.
@@ -160,7 +167,7 @@ Notes:
 `setup [--force] [--renew-profiles]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target] [--quiet|-q]` · `uninstall [target]` · `watch [target] [mode]` ·
 `test [filter] [timeout] [--no-build]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
 `logs [--cat] [--level] [N|tail]` · `debug [target] [--cat] [--level] [--script <names>] [--no-build]` · `signin` · `signout` · `e2e` · `e2e-run` ·
-`screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` · `ui <cmd>` ·
+`screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` · `record [simulator] [name] [--seconds] [--script] [--frames]` · `ui <cmd>` ·
 `profile [target] [--script] [--seconds] [--render] [--template] [--name]` ·
 `upload [--force] <text>` · `sentry <cmd>` · `[--server]` · `[--config <name>]`
 
