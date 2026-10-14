@@ -10,7 +10,7 @@ generate a thin `build.sh` entry via `./build.sh`-style scaffolding.
 |---|---|---|---|
 | `ios/` | ready | iOS app builds, lint gates, install/watch/test with Debug/Profile/Release configurations, Instruments profiling, logs/debug, e2e, TestFlight upload, Sentry queries, screenshots/vision |
 | `server/` | ready | Go server builds, start/stop/watch, lint/test, deploy/rollback (Fly.io), migrations, Sentry queries |
-| `android/` | started | emulator start/stop/status, screenshots/see, UI driving (`ui tap|swipe|type|press|describe`) with the same arguments and output as `ios` |
+| `android/` | ready | Gradle build, ktlint/detekt/Android Lint, unit tests with debug/profile/release build types, install/launch/uninstall, logs/debug with debug scripts, screenshots, in-app screenshot collection, screen recording with frames, UI driving, emulator start/stop, and overnight tools (locks, blocker log, night queue, package worktrees, doctor with a watchdog), with the same arguments and output as `ios` |
 | `web/` | planned | — |
 
 ## Adding the toolkit to a project
