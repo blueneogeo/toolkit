@@ -34,6 +34,9 @@ source "$SCRIPT_DIR/../shared/build-utils.sh"
 source "$SCRIPT_DIR/../shared/sentry.sh"
 source "$SCRIPT_DIR/../shared/vision.sh"
 source "$SCRIPT_DIR/../shared/build-client.sh"
+source "$SCRIPT_DIR/../shared/logfmt.sh"
+source "$SCRIPT_DIR/../shared/scripts.sh"
+source "$SCRIPT_DIR/../shared/record-frames.sh"
 source "$SCRIPT_DIR/build-lifecycle.sh"
 source "$SCRIPT_DIR/build-e2e.sh"
 source "$SCRIPT_DIR/build-upload.sh"
@@ -2634,15 +2637,6 @@ do_configure() {
 
 # ── Log inspection ───────────────────────────────────────────────────
 
-_level_grep() {
-    case "${1:-}" in
-        info)    grep -v "  DEBUG " || true ;;
-        warning) grep -v -E "  (DEBUG|INFO) " || true ;;
-        error)   grep -E "  (WARNING|ERROR) " || true ;;
-        *)       cat ;;
-    esac
-}
-
 _ios_logs() {
     _detect_project_config
     if [[ "${TOOLKIT_LOGS_ENABLED:-true}" != "true" ]]; then
@@ -2740,17 +2734,6 @@ _ios_logs() {
 }
 
 # ── Debug session ────────────────────────────────────────────────────
-
-_sanitize_script_names() {
-    local names="$1"
-    local pattern='^[A-Za-z0-9_, -]+$'
-    if [[ "$names" =~ $pattern && "$names" =~ [A-Za-z0-9_] ]]; then
-        printf '%s' "$names"
-        return 0
-    fi
-    echo "✗ Invalid --script names: use comma-separated identifiers (letters, digits, _, -, space)."
-    return 1
-}
 
 _clear_scriptor_marker() {
     local marker="${DEBUG_MARKER_NAME:-scriptor-ready}"
