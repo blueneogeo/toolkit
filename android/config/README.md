@@ -22,8 +22,9 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `build-overnight.sh` | `night init`, `blocker add`, the overnight folder |
 | `build-worktree.sh` | `worktree new\|remove\|list` |
 | `build-doctor.sh` | `doctor` |
+| `build-sync.sh` | `sync`, and the parity gate in `build` and `lint` |
 
-`toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `logfmt.sh` (`--level`), `scripts.sh` (script names), `vision.sh`.
+`toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `logfmt.sh` (`--level`), `scripts.sh` (script names), `vision.sh`, and `parity/` (the extractors and `parity.py` behind `sync`).
 
 ## Settings
 
@@ -46,7 +47,8 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `TOOLKIT_SERVER_ENABLED` | `false` | `adb reverse` on every launch, server check before tests |
 | `TOOLKIT_DEBUG_SCRIPTS` | `false` | `debug --script` and `record --script` |
 | `TOOLKIT_LOGS_ENABLED` | `true` | `logs` and `debug` |
-| `TOOLKIT_ARCH_CHECKS` | `true` | Runs `do_android_arch_checks` in lint when a lint file defines it |
+| `TOOLKIT_ARCH_CHECKS` | `true` | Runs `do_android_arch_checks` in lint when a lint file defines it, and the parity gate |
+| `TURN_ROOT` | none | The leading platform's repository; `sync` reads iOS from its commits, read-only |
 | `TOOLKIT_DEBUG_TIMEOUT` | `600` | Seconds a scripted `debug` waits for `DEBUG_SESSION_ENDED` |
 | `TOOLKIT_FIXTURE_SESSION_CMD` | `./build.sh fixture session` | Run with the slot before `--fixture` launches |
 | `TOOLKIT_OVERNIGHT_DIR` | `<main checkout>/../output/overnight` | Locks, night folders |
@@ -157,6 +159,25 @@ Commands take the locks themselves: Gradle calls the gradle lock; `install`, `la
 ```
 
 A lock is a directory per holder in `<overnight>/locks/` with the owner's PID and start time. A holder that exited, even with `kill -9`, is cleared on the next take.
+
+### sync
+
+The parity map compares the leading platform's Swift with the project's Kotlin, symbol by symbol, and the ledger under `sync/` records which iOS blob each unit was ported from. iOS is always read from a commit of `TURN_ROOT` (`git -C "$TURN_ROOT"`, read-only), never from its working tree; `--to` defaults to its `main`.
+
+| Command | Does |
+|---|---|
+| `sync status [--to <commit>] [-v]` | Lists shared inputs and units whose iOS files changed, were renamed (with git's similarity), added or deleted since the ledger's blobs. Per unit: the Android files, the diff stat, the commits that touched the files, symbols added, removed, changed and moved between units, and interaction APIs in the diff. `-v` prints the diffs. Exit 1 while anything is pending. |
+| `sync diff <unit> [--to <commit>]` | The iOS diff of one unit since its ledger commit. |
+| `sync mark <unit>... [--to] [--status <s>] [--no-change "<reason>"]` | Records the units at the iOS commit with their Android blobs. Refuses a unit whose iOS side changed while its Android files did not (unless `--no-change`), a unit whose mirrored Kotlin file is missing, and one that fails the parity check at that commit. A renamed unit replaces the old one; a unit deleted on iOS is removed once its Kotlin files are gone. The status defaults to `ported` once no `TODO("port:` is left, else `stub` or `partial`. |
+| `sync mark --commit [--to]` | Moves the marker in `sync/_sync.toml` and records the shared inputs, refusing while any unit is pending. |
+| `sync map [--gate] [--at <commit>] [--unit <u>]` | Writes `build/parity/map.json` and `map.md`. `--gate` fails on a strict-tier symbol with no Kotlin twin, a misnamed or moved twin, an Android-only symbol or file with no reason in `parity.toml`, and names missing from the guide's Coverage block. `build` and `lint` run it. |
+| `sync init --at <commit> [--force]` | Writes one ledger file per unit: `stub` where Kotlin files exist, `todo` where none do, `ios-only` per `parity.toml`. |
+| `sync coverage [<log>\|-]` | Reads `[coverage] script=<name> frame=<frame> views=<A,B>` log lines into `sync/coverage.json` and names view units no script shows. |
+| `sync guide [--seed] [--at <commit>]` | Checks the fenced `toml` block under `## Coverage` in `doc/platform-mapping.md`, or prints a seeded block with every iOS import and framework type. |
+
+The extractors build on first use into `build/parity-tools/`: the Swift one with swift-syntax (SwiftPM, about two minutes, offline once the package is in SwiftPM's cache), the Kotlin one with the Kotlin compiler's PSI from the Gradle cache, under the gradle lock. Results are cached per git blob in `build/parity/cache/`, so a warm map takes under a second.
+
+`parity.toml` holds the rules: source roots, tiers, how file names and enum cases change, split and moved files, renames, the type map for framework types, and the iOS-only and Android-only lists with their reasons.
 
 ### worktree
 

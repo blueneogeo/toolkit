@@ -30,6 +30,7 @@ source "$SCRIPT_DIR/build-record.sh"
 source "$SCRIPT_DIR/build-overnight.sh"
 source "$SCRIPT_DIR/build-worktree.sh"
 source "$SCRIPT_DIR/build-doctor.sh"
+source "$SCRIPT_DIR/build-sync.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/android.pid"
 TEST_TIMEOUT=120
@@ -109,7 +110,7 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        Run unit tests; filter by class name (or Class/method), timeout
                        in seconds (default $TEST_TIMEOUT). Gradle builds only what changed,
                        so --no-build is accepted and changes nothing
-    lint               ktlint, detekt and Android Lint on all sources
+    lint               ktlint, detekt, the parity gate and Android Lint on all sources
     format             Auto-format all Kotlin sources with ktlint
     doctor [--quick] [--json] [--watch [minutes]]
                        Check the machine, the SDK, the emulator and the server
@@ -140,6 +141,11 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        and contact sheets ('./build.sh android record --help')
     ui <tap|swipe|type|press|describe> [args]
                        Drive the screen and read its view tree ('./build.sh android ui')
+
+  Parity with the leading platform:
+    sync <status|diff|mark|map|init|coverage|guide>
+                       Compare with iOS and keep the per-unit ledger under sync/
+                       ('./build.sh android sync --help')
 
   Overnight work:
     lock <gradle|emulator> -- <command...>
@@ -257,6 +263,7 @@ _dispatch() {
         blocker)     shift; do_blocker "$@" ;;
         worktree)    shift; do_worktree "$@" ;;
         night)       shift; do_night "$@" ;;
+        sync)        shift; do_sync "$@" ;;
         help|--help|-h|"") usage ;;
         *)
             echo "✗ Unknown android command: $1"
