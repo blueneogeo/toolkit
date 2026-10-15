@@ -2649,9 +2649,10 @@ _ios_logs() {
         return 1
     fi
     local target="auto"
-    case "${1:-}" in
-        iphone|device|simulator) target="$1"; shift ;;
-    esac
+    if [[ -n "${1:-}" && "$1" != --* && "$1" != tail && ! "$1" =~ ^[0-9]+$ ]]; then
+        target="$1"
+        shift
+    fi
     _select_target "$target"
     local cat_filter=""
     local level_filter=""
@@ -2698,28 +2699,34 @@ _ios_logs() {
             fi
             case "$_TARGET_SDK" in
                 iphoneos)
-                    if [[ -n "${DEVICE_UDID:-}" ]]; then
-                        local desc="Collecting device logs"
-                        if [[ -n "$cat_filter" ]]; then
-                            desc="Collecting device logs (filter: $cat_filter)"
-                        fi
-                        echo "→ ${desc} (last ${lines} lines)..."
-                        local archive=/tmp/${PROJECT_NAME}-device-$$.logarchive
-                        log collect --device-udid "$DEVICE_UDID" --last 2m --output "$archive"
-                        if [[ -d "$archive" ]]; then
-                            if [[ -n "$cat_filter" ]]; then
-                                log show "$archive" --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
-                            else
-                                log show "$archive" --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
-                            fi
-                            rm -rf "$archive"
-                        else
-                            echo "  (log collect failed — see error above)"
-                        fi
-                    else
+                    if [[ -z "${DEVICE_UDID:-}" ]]; then
                         echo "✗ No device UDID found."
                         return 1
                     fi
+                    _require_cmd pymobiledevice3 "Install with: uv tool install pymobiledevice3"
+                    local desc="Last $lines device logs"
+                    if [[ -n "$cat_filter" ]]; then
+                        desc="Last $lines device logs (filter: $cat_filter)"
+                    fi
+                    echo "→ ${desc}:"
+                    # macOS's own `log collect --device-udid` needs root;
+                    # pymobiledevice3 fetches the same archive over USB without it.
+                    # `log show` on an archive ends with a footer naming its resolved path.
+                    local archive_dir
+                    archive_dir=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/${PROJECT_NAME}-device-logs.XXXXXX")" && pwd -P)
+                    local archive="$archive_dir/device.logarchive"
+                    if ! pymobiledevice3 syslog collect --udid "$DEVICE_UDID" --start-time "$(( $(date +%s) - 900 ))" "$archive" >/dev/null 2>"$archive_dir/error.txt"; then
+                        echo "✗ Could not read the phone's logs (is it connected by USB and unlocked?):"
+                        tail -5 "$archive_dir/error.txt" | sed 's/^/  /'
+                        rm -rf "$archive_dir"
+                        return 1
+                    fi
+                    if [[ -n "$cat_filter" ]]; then
+                        log show "$archive" --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                    else
+                        log show "$archive" --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                    fi
+                    rm -rf "$archive_dir"
                     ;;
                 iphonesimulator)
                     local desc="Last $lines sim logs"
@@ -3026,8 +3033,8 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     analyze            Run Xcode static analyzer (memory, logic, dead stores)
     audit              Run all analysis tools: lint + format-check + unused + analyze
     doctor             Check local build prerequisites
-    logs [--cat <cat>] [--level <level>] [N]  Show last N lines (default 10)
-    logs [--cat <cat>] [--level <level>] tail  Stream live app logs
+    logs [target] [--cat <cat>] [--level <level>] [N]  Show the last N lines of the last 15 minutes (default 10)
+    logs [target] [--cat <cat>] [--level <level>] tail  Stream live app logs
     debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build]
                          Build (or with --no-build, just relaunch), launch, and trace logs (auto-stop on background)
     signin [email code]  Sign the simulator in with SCRIPT_ENV_TURN_LOGIN_EMAIL / _CODE from build.properties.local, or with the given account and its fixed code (runs the sign_in script)
