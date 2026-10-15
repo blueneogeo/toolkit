@@ -15,7 +15,7 @@ PIDFILE = os.environ.get("BUILDER_PIDFILE", "")
 _STARTED = time.monotonic()
 
 IOS_CMDS = {"build", "clean", "install", "launch", "uninstall", "watch", "test", "tsan-test", "e2e",
-            "e2e-run", "screenshot", "screenshots", "see", "ui", "logs", "debug", "sentry"}
+            "e2e-run", "screenshot", "screenshots", "see", "ui", "logs", "debug", "sentry", "profile"}
 SERVER_CMDS = {"build", "test", "lint", "format", "docs", "sqlc", "watch"}
 LIVE_SUBS = {"status", "logs", "sql", "snapshots", "clusters",
              "deployments", "releases", "machines", "sentry"}

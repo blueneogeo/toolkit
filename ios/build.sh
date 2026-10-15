@@ -470,9 +470,7 @@ _do_build() {
     _check_build_tools
     _validate_target
     _ensure_project
-    if command -v swiftlint &>/dev/null; then
-        do_lint || return 1
-    fi
+    do_lint || return 1
     echo "→ Building $PROJECT_NAME for $_TARGET_NAME ($_TARGET_SDK, $cfg)"
     local logfile
     logfile=$(mktemp)
@@ -1402,8 +1400,6 @@ do_watch() {
     _require_cmd fswatch "Install with: brew install fswatch"
     _guard_not_running
 
-    local mode="${1:-swift}"
-
     _do_build "clean build"
     _launch_app
 
@@ -2119,6 +2115,8 @@ do_root_immutability_check() {
     echo "✓ Root immutability passed"
 }
 
+# Every state file, also one named after its domain (FeedState.swift); only
+# the composition root has no reset().
 do_reset_presence_check() {
     local src="$PROJECT_ROOT/$STATE_DIR"
     local violations=""
@@ -2127,7 +2125,7 @@ do_reset_presence_check() {
         if grep -q '@Observable' "$file" 2>/dev/null && ! grep -q 'func reset' "$file" 2>/dev/null; then
             violations+="  ${file#$PROJECT_ROOT/}: @Observable state class missing func reset()"$'\n'
         fi
-    done < <(find "$src" -name "${STATE_BASENAME}+*.swift" -type f 2>/dev/null)
+    done < <(find "$src" -name "*.swift" ! -name "${STATE_BASENAME}.swift" -type f 2>/dev/null)
     if [[ -n "$violations" ]]; then
         echo ""
         echo "  ✗ Domain state classes must define reset()"
@@ -2228,8 +2226,32 @@ do_arch_checks() {
     do_transport_construction_check || return 1
 }
 
+# The architecture gates need no SwiftLint, so they run without it; the
+# SwiftLint and SwiftFormat rules say when they are skipped.
 do_lint() {
-    _require_cmd swiftlint "Install with: brew install swiftlint"
+    if command -v swiftlint &>/dev/null; then
+        _swiftlint_check || return 1
+    else
+        echo "⚠ SwiftLint is not installed, so its rules were skipped. Install with: brew install swiftlint"
+    fi
+
+    if command -v swiftformat &>/dev/null; then
+        do_format_check || return 1
+    else
+        echo "⚠ SwiftFormat is not installed, so the format check was skipped. Install with: brew install swiftformat"
+    fi
+
+    if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
+        do_state_check || return 1
+        do_concurrency_check || return 1
+        do_structure_check || return 1
+        do_arch_checks || return 1
+    else
+        do_try_check || return 1
+    fi
+}
+
+_swiftlint_check() {
     local output
     local exit_code
     local lint_args=(--strict --quiet)
@@ -2247,19 +2269,6 @@ do_lint() {
         return 1
     fi
     echo "✓ Lint passed"
-
-    if command -v swiftformat &>/dev/null; then
-        do_format_check || return 1
-    fi
-
-    if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
-        do_state_check || return 1
-        do_concurrency_check || return 1
-        do_structure_check || return 1
-        do_arch_checks || return 1
-    else
-        do_try_check || return 1
-    fi
 }
 
 do_format_check() {
@@ -2722,9 +2731,9 @@ _ios_logs() {
                         return 1
                     fi
                     if [[ -n "$cat_filter" ]]; then
-                        log show "$archive" --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        log show "$archive" --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     else
-                        log show "$archive" --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        log show "$archive" --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     fi
                     rm -rf "$archive_dir"
                     ;;
@@ -2735,9 +2744,9 @@ _ios_logs() {
                     fi
                     echo "→ ${desc}:"
                     if [[ -n "$cat_filter" ]]; then
-                        xcrun simctl spawn "$SIM_ID" log show --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     else
-                        xcrun simctl spawn "$SIM_ID" log show --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     fi
                     ;;
             esac
