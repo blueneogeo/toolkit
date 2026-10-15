@@ -6,6 +6,7 @@
 # Provides: _resolve_java_home, _gradle_run, do_build, do_clean, do_test, do_lint, do_format
 # Depends on: _build_config, _build_variant, ANDROID_MODULE (build.sh)
 # Depends on: _lock_take, _lock_release (build-lock.sh), _night_dir (build-overnight.sh)
+# Depends on: _parity_gate (build-sync.sh)
 
 # Prints the JDK's major version (17, 21, ...) from its release file.
 _java_major() {
@@ -125,6 +126,9 @@ _lint_fast() {
     fi
     if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]] && declare -F do_android_arch_checks >/dev/null; then
         do_android_arch_checks || return 1
+    fi
+    if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
+        _parity_gate || return 1
     fi
     echo "✓ Lint passed"
 }
