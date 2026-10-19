@@ -715,7 +715,7 @@ _fly_deploy() {
         if do_test e2e live; then
             echo "  ✓ end-to-end test passed"
         else
-            echo "  ✗ end-to-end test failed — the deploy is live; see above, or roll back with: ./build.sh server rollback"
+            echo "  ✗ end-to-end test failed — the deploy is live; see above, or roll back with: ./build.sh server live rollback"
         fi
     fi
 

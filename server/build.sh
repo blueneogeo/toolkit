@@ -276,6 +276,16 @@ do_test() {
         echo "✗ 'test ${1}' is replaced by 'test e2e [local|live]', which reads the emails that really arrive."
         rm -f "$test_log"
         return 1
+    elif [ "${1:-}" = "e2e" ] && [ "${2:-}" = "headers" ]; then
+        # The full headers of every email one run received, read from the
+        # inbox (the saved copies keep only the body).
+        _load_env
+        if [[ -z "${3:-}" || -z "${RESEND_API_KEY:-}" || -z "${E2E_INBOX_DOMAIN:-}" ]]; then
+            echo "✗ Usage: test e2e headers <run>, e.g. 1019-105649 (needs RESEND_API_KEY and E2E_INBOX_DOMAIN)."
+            rm -f "$test_log"
+            return 1
+        fi
+        (cd "$PROJECT_ROOT" && E2E_HEADERS_RUN="$3" go test -timeout 120s -tags=e2e ./internal/e2e -run '^TestInboxHeaders$' -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "e2e" ]; then
         # Plays Turn's users against a running server through its API and
         # reads the emails that really arrive (internal/e2e).
@@ -753,6 +763,7 @@ Usage: ./build.sh server [--server] <command> (--server accepted in any position
                              emails and every link in them, against a running
                              server (needs RESEND_API_KEY, E2E_INBOX_DOMAIN);
                              keeps each email in build/e2e-mail/
+    test e2e headers <run>   Full headers of every email a run received
     lint         Run golangci-lint
     format       Auto-format all Go sources (golangci-lint --fix)
     doctor       Check local server build prerequisites
