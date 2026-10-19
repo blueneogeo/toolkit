@@ -137,14 +137,22 @@ _fly_status() {
     latest_release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first // empty | "v\(.Version) (\(.CreatedAt[:19] | sub("T";" ")))"' 2>/dev/null || true)
     echo "  Release:    $latest_release"
 
-    echo "$app_json" | jq -r '.Machines[]? | "\(.state // "?")|\(.region // "?")|\(.id[:12])"' | while IFS='|' read -r state region mid; do
+    # The public health URL reaches whichever machine Fly picks, so each
+    # running machine's own check is listed too.
+    echo "$app_json" | jq -r '.Machines[]? | "\(.state // "?")|\(.region // "?")|\(.id[:14])|\(.checks[0].status // "none")"' | while IFS='|' read -r state region mid check; do
         case "$state" in
             started) mark="$(_tty_green)✓$(_tty_reset)"; label="running" ;;
             stopped) mark="$(_tty_yellow)○$(_tty_reset)"; label="idle (auto-stop)" ;;
             *)       mark="$(_tty_red)✗$(_tty_reset)"; label="$state" ;;
         esac
+        if [[ "$state" == "started" && "$check" != "passing" ]]; then
+            mark="$(_tty_red)✗$(_tty_reset)"
+            label="running, health check $check"
+        fi
         printf '  %b machine %s  region=%s  %s\n' "$mark" "$mid" "$region" "$label"
     done
+    local failing_machines
+    failing_machines=$(echo "$app_json" | jq -r '[.Machines[]? | select(.state == "started" and (.checks[0].status // "none") != "passing") | .id] | join(", ")' 2>/dev/null)
 
     # ── Database ─────────────────────────────────────────────────
     echo ""
@@ -226,6 +234,9 @@ _fly_status() {
     if [[ "$db_status" != "ready" ]]; then
         all_ok=false
     fi
+    if [[ -n "$failing_machines" ]]; then
+        all_ok=false
+    fi
 
     if $all_ok; then
         echo -e "  ${GREEN}${BOLD}✓ All systems healthy${RESET}"
@@ -233,6 +244,7 @@ _fly_status() {
         echo -e "  ${RED}${BOLD}✗ Issues detected — review details above${RESET}"
         [[ "$hstatus" != "healthy" ]] && echo -e "  ${RED}→ Health check: $hstatus${RESET}"
         [[ "$db_status" != "ready" ]] && echo -e "  ${RED}→ Database: $db_status${RESET}"
+        [[ -n "$failing_machines" ]] && echo -e "  ${RED}→ Machines failing their health check: $failing_machines${RESET}"
     fi
 
     echo ""
