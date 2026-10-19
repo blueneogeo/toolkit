@@ -3,6 +3,7 @@
 #
 #   ./build.sh ios profile [target] [--script <names>] [--seconds N]
 #                          [--render] [--template <name>] [--name <label>]
+#                          [--callers <function>] [--trace <file>]
 #
 # Records an Instruments trace of the installed app (xctrace) on the
 # connected phone or the booted simulator, then prints a summary: the frame
@@ -10,14 +11,18 @@
 # heaviest functions by their own time, and the app's own heaviest code.
 # With --script the app is launched with those debug scripts running at
 # once, so a scripted interaction is measured end to end. The trace is kept
-# in build/traces/ to open in Instruments.
+# in build/traces/ to open in Instruments. --callers lists what was on the
+# stack whenever the named function ran, to find who calls a hot system
+# function; --trace reads a trace already recorded instead of a new one.
 
 do_profile() {
     _detect_project_config
     _check_core_tools
-    local target="" template="Time Profiler" seconds=40 scripts="" name="profile" render=false
+    local target="" template="Time Profiler" seconds=40 scripts="" name="profile" render=false callers="" existing=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --callers) callers="$2"; shift 2 ;;
+            --trace) existing="$2"; shift 2 ;;
             --template) template="$2"; shift 2 ;;
             --seconds) seconds="$2"; shift 2 ;;
             --script) scripts="$2"; shift 2 ;;
@@ -26,6 +31,12 @@ do_profile() {
             *) target="$1"; shift ;;
         esac
     done
+
+    if [[ -n "$existing" ]]; then
+        [[ -d "$existing" ]] || { echo "✗ No trace at $existing"; return 1; }
+        _profile_summary "$existing" "$callers"
+        return
+    fi
 
     _select_capture_target "$target" || return 1
     BUNDLE_ID="$(_bundle_id_for_config)"
@@ -54,12 +65,12 @@ do_profile() {
         fi
     fi
     echo "✓ Trace saved: $trace"
-    _profile_summary "$trace"
+    _profile_summary "$trace" "$callers"
 }
 
 # Prints the frame lines, the heaviest functions and the app's hot code.
 _profile_summary() {
-    local trace="$1"
+    local trace="$1" callers="${2:-}"
     local tmp
     tmp=$(mktemp -d)
     xcrun xctrace export --input "$trace" --toc > "$tmp/toc.xml" 2>/dev/null || true
@@ -71,11 +82,11 @@ _profile_summary() {
         xcrun xctrace export --input "$trace" \
             --xpath "/trace-toc/run[@number=\"1\"]/data/table[@schema=\"$table\"]" > "$tmp/$table.xml" 2>/dev/null || true
     done
-    python3 - "$tmp" "$PROJECT_NAME" <<'PY'
+    python3 - "$tmp" "$PROJECT_NAME" "$callers" <<'PY'
 import sys, xml.etree.ElementTree as ET
 from collections import Counter
 
-tmp, app = sys.argv[1], sys.argv[2]
+tmp, app, wanted = sys.argv[1], sys.argv[2], sys.argv[3]
 
 def load(name):
     try:
@@ -162,6 +173,7 @@ if profile is None:
     sys.exit(0)
 real = resolver(profile)
 self_time, app_inclusive, threads, total = Counter(), Counter(), Counter(), 0
+on_stack, wanted_total = Counter(), 0
 for row in profile.iter("row"):
     weight = real(row.find("weight"))
     backtrace = real(row.find("tagged-backtrace"))
@@ -187,6 +199,10 @@ for row in profile.iter("row"):
         if binary is not None and binary.attrib.get("name", "").startswith(app) and fname not in seen:
             app_inclusive[fname] += w
             seen.add(fname)
+    if wanted and wanted in names[0][0]:
+        wanted_total += w
+        for fname in dict.fromkeys(name for name, _ in names[1:]):
+            on_stack[fname] += w
 
 def show(title, counter, n):
     print(f"\n{title}")
@@ -197,6 +213,10 @@ print(f"\nSampled {total / 1e6:.0f} ms of CPU in the app")
 show("Time per thread:", threads, 8)
 show("Heaviest functions (own time):", self_time, 25)
 show(f"{app}'s own code (including what it calls):", app_inclusive, 25)
+if wanted:
+    print(f"\nOn the stack under {wanted} ({100 * wanted_total / max(total, 1):.1f}% of the time), share of its samples:")
+    for fname, w in on_stack.most_common(40):
+        print(f"  {100 * w / max(wanted_total, 1):5.1f}%  {fname[:150]}")
 PY
     rm -rf "$tmp"
 }
