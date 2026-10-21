@@ -2689,14 +2689,46 @@ _ios_logs() {
     _select_target "$target"
     local cat_filter=""
     local level_filter=""
+    local process="$APP_EXECUTABLE"
+    local minutes=15
     local cmd=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --cat) cat_filter="${2:-}"; shift 2 ;;
-            --level) level_filter="${2:-}"; shift 2 ;;
+            --cat | --level | --process | --minutes)
+                if [[ $# -lt 2 || "$2" == --* ]]; then
+                    echo "✗ $1 needs a value."
+                    return 1
+                fi
+                case "$1" in
+                    --cat) cat_filter="$2" ;;
+                    --level) level_filter="$2" ;;
+                    --process) process="$2" ;;
+                    --minutes) minutes="$2" ;;
+                esac
+                shift 2
+                ;;
             *) cmd="$1"; shift ;;
         esac
     done
+    if ! [[ "$minutes" =~ ^[1-9][0-9]*$ ]]; then
+        echo "✗ --minutes takes a whole number of minutes, from 1."
+        return 1
+    fi
+    if [[ "$cmd" == "tail" && ( "$process" != "$APP_EXECUTABLE" || "$minutes" != 15 ) ]]; then
+        echo "✗ tail follows the app's own lines; --process and --minutes are for the last N lines."
+        return 1
+    fi
+    # Another process's lines (e.g. ANECompilerService, which prepares Core
+    # ML models for the neural engine), or every process's with `all`: no
+    # predicate, since log show matches next to nothing with TRUEPREDICATE.
+    local predicate_args=(--predicate "process == \"$process\"")
+    if [[ "$process" == "all" ]]; then
+        predicate_args=()
+    fi
+    local source_name=""
+    if [[ "$process" != "$APP_EXECUTABLE" ]]; then
+        source_name=" of $process"
+    fi
     if [[ -z "$cmd" ]]; then
         cmd=10
     fi
@@ -2737,9 +2769,9 @@ _ios_logs() {
                         return 1
                     fi
                     _require_cmd pymobiledevice3 "Install with: uv tool install pymobiledevice3"
-                    local desc="Last $lines device logs"
+                    local desc="Last $lines device logs${source_name}"
                     if [[ -n "$cat_filter" ]]; then
-                        desc="Last $lines device logs (filter: $cat_filter)"
+                        desc="Last $lines device logs${source_name} (filter: $cat_filter)"
                     fi
                     echo "→ ${desc}:"
                     # macOS's own `log collect --device-udid` needs root;
@@ -2748,29 +2780,29 @@ _ios_logs() {
                     local archive_dir
                     archive_dir=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/${PROJECT_NAME}-device-logs.XXXXXX")" && pwd -P)
                     local archive="$archive_dir/device.logarchive"
-                    if ! pymobiledevice3 syslog collect --udid "$DEVICE_UDID" --start-time "$(( $(date +%s) - 900 ))" "$archive" >/dev/null 2>"$archive_dir/error.txt"; then
+                    if ! pymobiledevice3 syslog collect --udid "$DEVICE_UDID" --start-time "$(( $(date +%s) - minutes * 60 ))" "$archive" >/dev/null 2>"$archive_dir/error.txt"; then
                         echo "✗ Could not read the phone's logs (is it connected by USB and unlocked?):"
                         tail -5 "$archive_dir/error.txt" | sed 's/^/  /'
                         rm -rf "$archive_dir"
                         return 1
                     fi
                     if [[ -n "$cat_filter" ]]; then
-                        log show "$archive" --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        log show "$archive" --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     else
-                        log show "$archive" --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        log show "$archive" --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     fi
                     rm -rf "$archive_dir"
                     ;;
                 iphonesimulator)
-                    local desc="Last $lines sim logs"
+                    local desc="Last $lines sim logs${source_name}"
                     if [[ -n "$cat_filter" ]]; then
-                        desc="Last $lines sim logs (filter: $cat_filter)"
+                        desc="Last $lines sim logs${source_name} (filter: $cat_filter)"
                     fi
                     echo "→ ${desc}:"
                     if [[ -n "$cat_filter" ]]; then
-                        xcrun simctl spawn "$SIM_ID" log show --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact --last "${minutes}m" 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     else
-                        xcrun simctl spawn "$SIM_ID" log show --info --predicate "process == \"$APP_EXECUTABLE\"" --style compact --last 15m 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact --last "${minutes}m" 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
                     fi
                     ;;
             esac
@@ -3066,7 +3098,9 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     analyze            Run Xcode static analyzer (memory, logic, dead stores)
     audit              Run all analysis tools: lint + format-check + unused + analyze
     doctor             Check local build prerequisites
-    logs [target] [--cat <cat>] [--level <level>] [N]  Show the last N lines of the last 15 minutes (default 10)
+    logs [target] [--cat <cat>] [--level <level>] [--process <name|all>] [--minutes M] [N]
+                 Show the last N lines (default 10) of the last M minutes (default 15),
+                 from the app, another process (e.g. ANECompilerService) or all of them
     logs [target] [--cat <cat>] [--level <level>] tail  Stream live app logs
     debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build]
                          Build (or with --no-build, just relaunch), launch, and trace logs (auto-stop on background)

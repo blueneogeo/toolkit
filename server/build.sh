@@ -171,7 +171,7 @@ do_start() {
     do_build
 
     mkdir -p "$(dirname "$PID_FILE")"
-    nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1 &
+    (cd "$PROJECT_ROOT" && exec nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1) &
     echo "$!" > "$PID_FILE"
 
     sleep "$STARTUP_DELAY"
@@ -202,7 +202,7 @@ do_watch() {
     do_build
 
     mkdir -p "$(dirname "$PID_FILE")"
-    nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1 &
+    (cd "$PROJECT_ROOT" && exec nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1) &
     local server_pid=$!
     echo "$server_pid" > "$PID_FILE"
 
@@ -221,7 +221,7 @@ do_watch() {
             _register_firewall
             kill "$server_pid" 2>/dev/null || true
             sleep "$RESTART_DELAY"
-            nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1 &
+            (cd "$PROJECT_ROOT" && exec nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1) &
             server_pid=$!
             echo "$server_pid" > "$PID_FILE"
             echo "[$(date '+%H:%M:%S')] ✓ Restarted (PID $server_pid)"
