@@ -1833,6 +1833,21 @@ do_concurrency_check() {
         fi
     }
 
+    _conc_rule() {
+        # A system or library callback: the line must carry the required form.
+        local pattern="$1" required="$2" msg="$3"
+        local matches
+        matches=$(grep -rn "$pattern" "$src" --include="*.swift" 2>/dev/null | grep -v "$required" | grep -v '// concurrent-safe:' || true)
+        if [[ -n "$matches" ]]; then
+            echo ""
+            echo "  ✗ $msg"
+            while IFS= read -r line; do
+                echo "    ${line#$PROJECT_ROOT/}"
+            done <<< "$matches"
+            found=1
+        fi
+    }
+
     _conc_grep_hard() {
         # Hard-forbidden: no // concurrent-safe: override. Restructure instead.
         local pattern="$1" msg="$2"
@@ -1858,6 +1873,15 @@ do_concurrency_check() {
     _conc_grep 'String(contentsOf:'      'String(contentsOf:) — synchronous file I/O. Must run off the main actor; add // concurrent-safe: <reason> documenting the queue/actor it runs on'
     _conc_grep 'UIImage(contentsOfFile:' 'UIImage(contentsOfFile:) — synchronous file I/O. Must run off the main actor; add // concurrent-safe: <reason> documenting the queue/actor it runs on'
     _conc_grep 'captureSession\.startRunning\|captureSession\.stopRunning' 'AVCaptureSession start/stopRunning — must be inside an actor with a custom serial executor. Do not call from @MainActor'
+
+    # Callbacks iOS or a library calls on a queue of its own: one rule. They
+    # run on the main queue, or they are @Sendable and hop to the main actor.
+    # A closure written in @MainActor code is main-actor isolated, and Swift
+    # traps when another queue calls it.
+    _conc_rule 'expirationHandler = {'          '@Sendable'    'BGTask.expirationHandler — iOS calls it on its own queue: write { @Sendable in … } and hop with Task { @MainActor in … }'
+    _conc_rule 'register(forTaskWithIdentifier' 'using: \.main' 'BGTaskScheduler.register — pass using: .main so the launch handler runs on the main queue'
+    _conc_rule 'addObserver(forName'            'queue: \.main' 'NotificationCenter.addObserver(forName:) — pass queue: .main; with nil the block runs on the posting thread'
+    _conc_rule 'pathUpdateHandler = {'          '@Sendable'    'NWPathMonitor.pathUpdateHandler — write { @Sendable path in … } and hop to the main actor'
 
     # Hard-forbidden: no override exists for these.
     _conc_grep_hard 'DispatchQueue\.global('  'DispatchQueue.global — forbidden. Use a named serial queue or actor'
