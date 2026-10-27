@@ -9,6 +9,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# A value inside a Swift string literal, its backslashes and quotes escaped.
+_swift_escape() {
+    local value=${1//\\/\\\\}
+    printf '%s' "${value//\"/\\\"}"
+}
+
 # The host project root. The project entry exports TOOLKIT_PROJECT_ROOT; when
 # run directly, fall back to walking up from the toolkit to the nearest
 # project.yml/build.properties (handles <project>/toolkit/ios and <project>/ios-toolkit layouts).
@@ -2907,17 +2913,37 @@ _ios_debug() {
     fi
     case "$_TARGET_SDK" in
         iphoneos)
-            # Device: devicectl can't inject env, so compile the names in.
+            # Device: devicectl can't inject env, so compile the names and
+            # the SCRIPT_ENV_<NAME> values in.
             if [[ -n "$script_names" && -d "$PROJECT_ROOT/$debug_dir" ]]; then
+                local environment="" env_var
+                for env_var in $(compgen -v SCRIPT_ENV_); do
+                    environment+="        \"${env_var#SCRIPT_ENV_}\": \"$(_swift_escape "${!env_var}")\","$'\n'
+                done
+                if [[ -n "${_SIGNIN_EMAIL:-}" ]]; then
+                    environment+="        \"TURN_LOGIN_EMAIL\": \"$(_swift_escape "$_SIGNIN_EMAIL")\","$'\n'
+                    environment+="        \"TURN_LOGIN_CODE\": \"$(_swift_escape "$_SIGNIN_CODE")\","$'\n'
+                fi
+                if [[ -n "$environment" ]]; then
+                    environment="["$'\n'"$environment    ]"
+                else
+                    environment="[:]"
+                fi
                 cat > "$PROJECT_ROOT/$debug_dir/config.swift" << EOF
 #if DEBUG
 import Foundation
 
 enum DebugScriptConfig {
     static let compileTimeNames = "$script_names"
+    static let compileTimeEnvironment: [String: String] = $environment
 
     static var names: String {
         ProcessInfo.processInfo.environment["TURN_DEBUG_SCRIPT_NAMES"] ?? compileTimeNames
+    }
+
+    /// The launch environment, with what a phone run compiled in.
+    static var environment: [String: String] {
+        compileTimeEnvironment.merging(ProcessInfo.processInfo.environment) { \$1 }
     }
 }
 #endif
