@@ -93,12 +93,13 @@ _prune_model_cache() {
     local data cache newest dir mtime removed=0 freed=0 size
     data=$(xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" data 2>/dev/null) || return 0
     while IFS= read -r cache; do
-        newest=$(find "$cache" -mindepth 2 -maxdepth 2 -type d -exec stat -f %m {} + 2>/dev/null | sort -n | tail -1)
+        newest=$(find "$cache" -mindepth 2 -maxdepth 2 -type d -exec stat -f %m {} + 2>/dev/null | sort -n | tail -1 || true)
         [[ -z "$newest" ]] && continue
         while IFS= read -r dir; do
-            mtime=$(stat -f %m "$dir")
+            mtime=$(stat -f %m "$dir" 2>/dev/null) || continue
             if (( mtime < newest - 600 )); then
-                size=$(du -sk "$dir" | cut -f1)
+                size=$(du -sk "$dir" 2>/dev/null | cut -f1) || continue
+                [[ -n "$size" ]] || continue
                 rm -rf "$dir"
                 removed=$((removed + 1))
                 freed=$((freed + size))

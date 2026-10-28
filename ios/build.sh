@@ -185,12 +185,18 @@ _UDID_PATTERN='[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F
 # reach, by cable or network. devicectl lists simulators too; they are left out.
 _physical_devices() {
     local line udid name model
-    xcrun devicectl list devices 2>/dev/null | grep -E ' physical *$' | grep -E '\(UDID\) +(available|connected)' | while IFS= read -r line; do
+    xcrun devicectl list devices 2>/dev/null | { grep -E ' physical *$' || true; } | { grep -E '\(UDID\) +(available|connected)' || true; } | while IFS= read -r line; do
         udid=$(echo "$line" | grep -oE "$_UDID_PATTERN" | head -1)
         name=$(echo "$line" | sed -E "s/ *${udid}.*//;s/^ *//;s/ *$//;s/ +[^ ]+\.coredevice\.local//")
         model=$(echo "$line" | sed -E 's/.*\(UDID\) +(available \(paired\)|available|connected) +//;s/ +physical *$//')
         echo "$udid | $name | $model"
     done
+    return 0
+}
+
+# One "|"-separated field of a device line, without the spaces around it.
+_device_field() {
+    cut -d'|' -f"$1" | sed -E 's/^ +//;s/ +$//'
 }
 
 _print_devices() {
@@ -222,7 +228,7 @@ _detect_device() {
     else
         if [[ $(printf '%s\n' "$all_devices" | wc -l | tr -d ' ') -gt 1 ]]; then
             local first_udid
-            first_udid=$(printf '%s\n' "$all_devices" | head -1 | cut -d'|' -f1 | xargs)
+            first_udid=$(printf '%s\n' "$all_devices" | head -1 | _device_field 1)
             echo "✗ Multiple devices found. Use --device to select one, or set IOS_DEVICE:"
             echo ""
             _print_devices "$all_devices"
@@ -234,8 +240,8 @@ _detect_device() {
         dest="$all_devices"
     fi
 
-    DEVICE_UDID=$(echo "$dest" | cut -d'|' -f1 | xargs)
-    DEVICE_NAME=$(echo "$dest" | cut -d'|' -f2 | xargs)
+    DEVICE_UDID=$(echo "$dest" | _device_field 1)
+    DEVICE_NAME=$(echo "$dest" | _device_field 2)
     DEVICE_DEST="generic/platform=iOS"
 
     if [[ -n "$_DEVICE_SELECTOR" && -z "${IOS_DEVICE:-}" && $(printf '%s\n' "$all_devices" | wc -l | tr -d ' ') -gt 1 ]]; then
@@ -818,7 +824,7 @@ _capture_resolve_device() {
         printf '%s\n' "$lines" | sed 's/^/    /'
         return 1
     fi
-    _CAPTURE_UDID=$(printf '%s' "$match" | cut -d'|' -f2 | xargs)
+    _CAPTURE_UDID=$(printf '%s' "$match" | _device_field 2)
 }
 
 _report_capture_error() {
@@ -2314,7 +2320,7 @@ _swiftlint_check() {
     for child in "${runs[@]}"; do
         local lint_args=("${base_args[@]}")
         [[ -n "$SWIFTLINT_CONFIG" ]] && lint_args+=(--config "$SWIFTLINT_CONFIG")
-        [[ -n "$child" ]] && lint_args+=(--config "$child")
+        [[ -n "$child" ]] && lint_args+=(--config "$child" "$(dirname "$child")")
         run_output=$(cd "$PROJECT_ROOT" && swiftlint "${lint_args[@]}" 2>&1) && exit_code=0 || exit_code=$?
         if [[ $exit_code -ne 0 ]] || echo "$run_output" | grep -qiE "warning:|error:"; then
             failed=true
@@ -2524,7 +2530,7 @@ do_doctor() {
     device_info=$(_physical_devices)
     device_count=$(printf '%s' "$device_info" | grep -c . || true)
     if [[ "$device_count" -eq 1 ]]; then
-        echo "  ✓ Device: $(echo "$device_info" | cut -d'|' -f2 | xargs) ($(echo "$device_info" | cut -d'|' -f1 | xargs))"
+        echo "  ✓ Device: $(echo "$device_info" | _device_field 2) ($(echo "$device_info" | _device_field 1))"
     elif [[ "$device_count" -gt 1 ]]; then
         echo "  ℹ $device_count devices detected — use --device or IOS_DEVICE to select one"
     else
@@ -2718,14 +2724,17 @@ _compact_log_format() {
         -e "s/^([0-9:.]+  )\[${BUNDLE_ID//./\\.}[^]]*\] /\1/"
 }
 
-# The app's own log lines from the phone, live, as "<time>  <message>". The
-# syslog relay idevicesyslog reads carries only default level and up, which
-# drops every info and debug line; the activity stream carries them all.
-# Its subsystem filter keeps the app's and its extensions' loggers.
+# The app's own log lines from the phone, live, in the form of
+# _compact_log_format. The syslog relay idevicesyslog reads carries only
+# default level and up, which drops every info and debug line; the activity
+# stream carries them all. Its subsystem filter keeps the app's and its
+# extensions' loggers. pymobiledevice3's first error line is shown.
 _device_log_stream() {
     _require_cmd pymobiledevice3 "Install with: uv tool install pymobiledevice3"
-    pymobiledevice3 syslog live --udid "$DEVICE_UDID" --subsystem "${BUNDLE_ID}*" 2>/dev/null \
-        | sed -l -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{3})?)[0-9]* [^<]*<[A-Z_]+>: /\1  /'
+    pymobiledevice3 syslog live --udid "$DEVICE_UDID" --subsystem "${BUNDLE_ID}*" --label \
+        2> >(sed -n '1s/^/  pymobiledevice3: /p' >&2) \
+        | sed -l -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{3})?)[0-9]* [^<]*<[A-Z_]+>: (.*) \[([^]]*)\]\[([^]]*)\]$/\1  [\4:\5] \3/' \
+        | _compact_log_format
 }
 
 _ios_logs() {
@@ -2995,8 +3004,9 @@ enum DebugScriptConfig {
 #endif
 EOF
             fi
-            local fifo pipe_pid reader_pid
+            local fifo installed pipe_pid reader_pid
             fifo=$(mktemp -u)
+            installed="$fifo.installed"
             mkfifo "$fifo"
             _device_log_stream > "$fifo" &
             pipe_pid=$!
@@ -3029,22 +3039,28 @@ EOF
                             break
                         fi
                         app_launched=true
-                    elif $app_launched; then
-                        if ! _app_running; then
+                    elif [[ -f "$installed" ]]; then
+                        # A silent stream: once installed, the app's own process decides.
+                        if _app_running; then
+                            app_launched=true
+                        elif $app_launched; then
                             break
                         fi
                     fi
                 done < "$fifo"
             } &
             reader_pid=$!
+            trap "pkill -P $pipe_pid 2>/dev/null; kill $pipe_pid $reader_pid 2>/dev/null; rm -f '$fifo' '$installed'" EXIT INT TERM
             do_install "${_DEVICE_SELECTOR:-device}"
+            touch "$installed"
             if [[ -n "$script_names" ]]; then
                 _write_scriptor_marker
             fi
             wait "$reader_pid" 2>/dev/null || true
             pkill -P "$pipe_pid" 2>/dev/null || true
-            kill -9 "$pipe_pid" 2>/dev/null; { wait "$pipe_pid"; } 2>/dev/null || true
-            rm -f "$fifo" 2>/dev/null || true
+            kill "$pipe_pid" 2>/dev/null; { wait "$pipe_pid"; } 2>/dev/null || true
+            rm -f "$fifo" "$installed"
+            trap - EXIT INT TERM
             ;;
 
         iphonesimulator)
