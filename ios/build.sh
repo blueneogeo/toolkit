@@ -565,7 +565,7 @@ _fastlane_setup() {
     if [[ -n "${IOS_KEY_ID:-}" && -n "${IOS_ISSUER_ID:-}" && -f "$key_path" ]]; then
         api_key_json=$(mktemp -t match-api-key)
         chmod 600 "$api_key_json"
-        trap 'rm -f "$api_key_json"' RETURN
+        trap "rm -f '$api_key_json'; trap - RETURN" RETURN
         local ruby_cmd=ruby
         [[ "$bundle_cmd" == */* ]] && ruby_cmd="$(dirname "$bundle_cmd")/ruby"
         "$ruby_cmd" -rjson -e \
