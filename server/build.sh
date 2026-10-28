@@ -250,12 +250,13 @@ do_test() {
     do_sqlc || return 1
     _check_quality || return 1
 
-    # Parse optional timeout from args (any bare number is treated as a timeout override)
+    # Parse optional timeout from args (a bare number is a timeout override,
+    # except the pattern right after "run")
     local timeout="${TEST_TIMEOUT}s"
     local -a filtered=()
     local arg
     for arg in "$@"; do
-        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+        if [[ "$arg" =~ ^[0-9]+$ && ! ( ${#filtered[@]} -eq 1 && "${filtered[0]}" = "run" ) ]]; then
             timeout="${arg}s"
         else
             filtered+=("$arg")
@@ -333,6 +334,11 @@ do_test() {
         (cd "$PROJECT_ROOT" && go test -timeout "$timeout" ./... -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     fi
 
+    if [[ $test_exit -eq 0 && "${1:-}" = "run" ]] && ! grep -q -- '--- PASS' "$test_log"; then
+        rm -f "$test_log"
+        echo "✗ No test matches '${2}'"
+        return 1
+    fi
     if [[ $test_exit -eq 0 ]]; then
         local pkg_count
         pkg_count=$(grep -c '^ok ' "$test_log" 2>/dev/null || echo 0)
