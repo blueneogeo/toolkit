@@ -1925,7 +1925,7 @@ do_concurrency_check() {
 
 # The forms a line uses to explain a departure from a rule. Each needs its
 # reason after the colon.
-ANNOTATION_FORMS='non-actionable concurrent-safe ios-only'
+ANNOTATION_FORMS='non-actionable concurrent-safe ios-only old-server'
 
 do_annotation_reason_check() {
     local forms matches

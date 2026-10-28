@@ -89,7 +89,7 @@ When `TOOLKIT_ARCH_CHECKS=true`, `lint` and every build additionally enforce:
 - `do_handler_suffix_check` — `on<Subject><Event>` with an approved suffix list
 - `do_mark_spacing_check` — blank-line padding around `// MARK:`
 - `do_try_check` — no unjustified `try?` (requires `// non-actionable:`)
-- `do_annotation_reason_check` — `// non-actionable:`, `// concurrent-safe:` and `// ios-only:` each carry a reason after the colon
+- `do_annotation_reason_check` — `// non-actionable:`, `// concurrent-safe:`, `// ios-only:` and `// old-server:` each carry a reason after the colon
 - `do_handler_visibility_check` — handlers (`on<Subject><Event>`) must not be `private`; private imperative work is an action
 - `do_observable_class_check` — `@Observable` must annotate a `@MainActor final class`
 - `do_root_immutability_check` — the composition-root file declares no `var` (only `let` instances/resources)
