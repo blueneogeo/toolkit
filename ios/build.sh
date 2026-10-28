@@ -131,9 +131,11 @@ _detect_project_config() {
     if [[ -z "$BUNDLE_ID" && -f "$PROJECT_ROOT/project.yml" ]]; then
         BUNDLE_ID=$(grep -m1 'PRODUCT_BUNDLE_IDENTIFIER:' "$PROJECT_ROOT/project.yml" | sed 's/.*: *//' | sed 's/[()$]//g' || true)
     fi
-    BUNDLE_ID="${BUNDLE_ID:-com.example.${PROJECT_NAME,,}}"
+    BUNDLE_ID="${BUNDLE_ID:-com.example.$(echo "$PROJECT_NAME" | tr "[:upper:]" "[:lower:]")}"
 
     E2E_SCHEME="${E2E_SCHEME:-${PROJECT_NAME}E2E}"
+    # Debug scripts read <PREFIX>_DEBUG_SCRIPT_NAMES and, for signin, <PREFIX>_LOGIN_EMAIL / _CODE.
+    DEBUG_ENV_PREFIX="${TOOLKIT_DEBUG_ENV_PREFIX:-$(echo "$PROJECT_NAME" | tr '[:lower:]' '[:upper:]')}"
 
     # Architecture-check configuration (used only when TOOLKIT_ARCH_CHECKS=true)
     TOOLKIT_STATE_CLASS="${TOOLKIT_STATE_CLASS:-AppState}"
@@ -143,6 +145,18 @@ _detect_project_config() {
     STATE_FILE_PATH="$SOURCE_DIR/$TOOLKIT_STATE_FILE"
     # Optional transport file/class (empty disables transport purity + construction checks)
     TOOLKIT_TRANSPORT_FILE="${TOOLKIT_TRANSPORT_FILE:-}"
+
+    # The tests and debug scripts are linted too, by the rules that are not
+    # about the app's architecture. TOOLKIT_LINT_EXTRA_DIRS overrides the list.
+    LINT_EXTRA_DIRS=()
+    local extra_dir
+    for extra_dir in ${TOOLKIT_LINT_EXTRA_DIRS-$TEST_TARGET ${TOOLKIT_DEBUG_SCRIPT_DIR:-debug}}; do
+        [[ -d "$PROJECT_ROOT/$extra_dir" ]] && LINT_EXTRA_DIRS+=("$extra_dir")
+    done
+    CODE_DIRS=("$PROJECT_ROOT/$SOURCE_DIR")
+    for extra_dir in ${LINT_EXTRA_DIRS[@]+"${LINT_EXTRA_DIRS[@]}"}; do
+        CODE_DIRS+=("$PROJECT_ROOT/$extra_dir")
+    done
 
     SWIFTLINT_CONFIG="${SWIFTLINT_CONFIG:-$(_find_up .swiftlint.yml || true)}"
     PERIPHERY_CONFIG="${PERIPHERY_CONFIG:-$(_find_up .periphery.yml || true)}"
@@ -165,82 +179,73 @@ SIM_DEST="platform=iOS Simulator,name=${SIM_NAME},OS=${SIM_OS}"
 
 # ── Device discovery ────────────────────────────────────────────────
 
+_UDID_PATTERN='[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}'
+
+# Prints "<udid> | <name> | <model>" for every physical phone devicectl can
+# reach, by cable or network. devicectl lists simulators too; they are left out.
+_physical_devices() {
+    local line udid name model
+    xcrun devicectl list devices 2>/dev/null | grep -E ' physical *$' | grep -E '\(UDID\) +(available|connected)' | while IFS= read -r line; do
+        udid=$(echo "$line" | grep -oE "$_UDID_PATTERN" | head -1)
+        name=$(echo "$line" | sed -E "s/ *${udid}.*//;s/^ *//;s/ *$//;s/ +[^ ]+\.coredevice\.local//")
+        model=$(echo "$line" | sed -E 's/.*\(UDID\) +(available \(paired\)|available|connected) +//;s/ +physical *$//')
+        echo "$udid | $name | $model"
+    done
+}
+
+_print_devices() {
+    printf '%s\n' "$1" | sed 's/^/    /'
+}
+
 _detect_device() {
-    local all_devices dest match_count
-    all_devices=$(xcrun devicectl list devices 2>/dev/null | grep -v "Name\|^--")
+    local all_devices dest
+    all_devices=$(_physical_devices)
     if [[ -z "$all_devices" ]]; then
         return 1
     fi
 
     if [[ -n "$_DEVICE_SELECTOR" ]]; then
-        dest=$(echo "$all_devices" | grep -i "$_DEVICE_SELECTOR" | head -1)
+        dest=$(printf '%s\n' "$all_devices" | grep -iF -- "$_DEVICE_SELECTOR" || true)
         if [[ -z "$dest" ]]; then
             echo "✗ No device matching '$_DEVICE_SELECTOR' found."
             echo ""
             echo "  Available devices:"
-            echo "$all_devices" | while IFS= read -r line; do
-                local name udid
-                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
-                name=$(echo "$line" | sed -E "s/ *${udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
-                echo "    $name  ($udid)"
-            done
+            _print_devices "$all_devices"
             exit 1
         fi
-        match_count=$(echo "$all_devices" | grep -ci "$_DEVICE_SELECTOR" || true)
-        if [[ "$match_count" -gt 1 ]]; then
-            echo "✗ Multiple devices match '$_DEVICE_SELECTOR'. Be more specific, or set IOS_DEVICE:"
+        if [[ $(printf '%s\n' "$dest" | wc -l | tr -d ' ') -gt 1 ]]; then
+            echo "✗ Multiple devices match '$_DEVICE_SELECTOR'. Be more specific (a UDID always is), or set IOS_DEVICE:"
             echo ""
-            echo "$all_devices" | while IFS= read -r line; do
-                local name udid
-                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
-                name=$(echo "$line" | sed -E "s/ *${udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
-                echo "    $name  ($udid)"
-            done
+            _print_devices "$dest"
             exit 1
         fi
     else
-        match_count=$(echo "$all_devices" | wc -l | tr -d ' ')
-        if [[ "$match_count" -gt 1 ]]; then
-            local first_name first_udid
-            first_udid=$(echo "$all_devices" | head -1 | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
-            first_name=$(echo "$all_devices" | head -1 | sed -E "s/ *${first_udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
+        if [[ $(printf '%s\n' "$all_devices" | wc -l | tr -d ' ') -gt 1 ]]; then
+            local first_udid
+            first_udid=$(printf '%s\n' "$all_devices" | head -1 | cut -d'|' -f1 | xargs)
             echo "✗ Multiple devices found. Use --device to select one, or set IOS_DEVICE:"
             echo ""
-            echo "$all_devices" | while IFS= read -r line; do
-                local name udid
-                udid=$(echo "$line" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
-                name=$(echo "$line" | sed -E "s/ *${udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
-                echo "    $name  ($udid)"
-            done
+            _print_devices "$all_devices"
             echo ""
-            echo "  Example: ./build.sh --device \"$first_name\" install"
-            echo "  Or set:  export IOS_DEVICE=\"$first_name\""
+            echo "  Example: ./build.sh --device \"$first_udid\" install"
+            echo "  Or set:  export IOS_DEVICE=\"$first_udid\""
             exit 1
         fi
         dest="$all_devices"
     fi
 
-    DEVICE_UDID=$(echo "$dest" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}')
-    DEVICE_NAME=$(echo "$dest" | sed -E "s/ *${DEVICE_UDID}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
+    DEVICE_UDID=$(echo "$dest" | cut -d'|' -f1 | xargs)
+    DEVICE_NAME=$(echo "$dest" | cut -d'|' -f2 | xargs)
     DEVICE_DEST="generic/platform=iOS"
 
-    if [[ -n "$_DEVICE_SELECTOR" && -z "${IOS_DEVICE:-}" ]]; then
-        local total_devices
-        total_devices=$(echo "$all_devices" | wc -l | tr -d ' ')
-        if [[ "$total_devices" -gt 1 ]]; then
-            echo "  Tip: set export IOS_DEVICE=\"$_DEVICE_SELECTOR\" to skip --device next time."
-        fi
+    if [[ -n "$_DEVICE_SELECTOR" && -z "${IOS_DEVICE:-}" && $(printf '%s\n' "$all_devices" | wc -l | tr -d ' ') -gt 1 ]]; then
+        echo "  Tip: set export IOS_DEVICE=\"$_DEVICE_SELECTOR\" to skip --device next time."
     fi
 }
 
-# ── Non-fatal device availability check ─────────────────────────────
-
 # Returns 0 when at least one physical iPhone is connected, 1 otherwise.
 _device_connected() {
-    local devices
-    devices=$(xcrun devicectl list devices 2>/dev/null | grep -v "^Name" | grep -v "^--" | grep "available" || true)
-    [[ -z "$devices" ]] && return 1
-    return 0
+    [[ -n "$(_physical_devices)" ]]
 }
 
 # Prints the UDID of the first booted simulator, empty string if none.
@@ -450,7 +455,7 @@ _ensure_project() {
         return
     fi
     local newer_source_dir
-    newer_source_dir=$(find "$PROJECT_ROOT/$SOURCE_DIR" "$PROJECT_ROOT/${PROJECT_NAME}Tests" "$PROJECT_ROOT/${PROJECT_NAME}UITests" "$PROJECT_ROOT/debug" -type d -newer "$project_file" -print -quit 2>/dev/null || true)
+    newer_source_dir=$(find "${CODE_DIRS[@]}" -type d -newer "$project_file" -print -quit 2>/dev/null || true)
     if [[ "$PROJECT_ROOT/project.yml" -nt "$project_file" || -n "$newer_source_dir" ]]; then
         _require_cmd xcodegen "Install with: brew install xcodegen"
         (cd "$PROJECT_ROOT" && xcodegen generate)
@@ -879,7 +884,7 @@ do_screenshot() {
     _select_capture_target "$target" || return 1
     local dir="${PROJECT_ROOT}/build/screenshots"
     mkdir -p "$dir"
-    local file="turn_$(date +%Y%m%d-%H%M%S).png"
+    local file="$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')_$(date +%Y%m%d-%H%M%S).png"
     name="${name//\//_}"
     [[ -n "$name" ]] && file="${name}.png"
     _capture_screenshot "$dir/$file" || return 1
@@ -1503,7 +1508,7 @@ _run_tests_with_watchdog() {
     shift
     local grace=20
     local log_file
-    log_file=$(mktemp -t turn-ios-test)
+    log_file=$(mktemp -t "${PROJECT_NAME}-ios-test")
     local xc_pid
     xcodebuild "$@" > >(tee "$log_file") 2>&1 &
     xc_pid=$!
@@ -1545,78 +1550,46 @@ _run_tests_with_watchdog() {
     return "$rc"
 }
 
-do_tsan_test() {
+# Builds the tests once, then runs them (or only the class a filter names)
+# under the watchdog. Extra xcodebuild flags (e.g. the thread sanitiser) come
+# after the label.
+_run_unit_tests() {
+    local label="$1"
+    shift
+    local -a extra=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do
+        extra+=("$1")
+        shift
+    done
+    [[ "${1:-}" == "--" ]] && shift
+
     _detect_project_config
     _check_core_tools
     _set_mode_sim
     _validate_sim_target
     _ensure_project
-    echo "Testing $PROJECT_NAME on $SIM_NAME ($SIM_OS) with Thread Sanitizer."
-    if [[ "${TOOLKIT_SERVER_ENABLED:-false}" == "true" ]]; then
-        _require_server
-    fi
+    echo "Testing $PROJECT_NAME on $SIM_NAME ($SIM_OS)${label:+ with $label}."
 
     local test_filter=""
     local test_timeout=$TEST_TIMEOUT
     local skip_build=false
+    local build_only=false
+    local arg
     for arg in "$@"; do
         if [[ "$arg" =~ ^[0-9]+$ ]]; then
             test_timeout="$arg"
         elif [[ "$arg" == "--no-build" ]]; then
             skip_build=true
+        elif [[ "$arg" == "--build-only" ]]; then
+            build_only=true
         else
             test_filter="$arg"
         fi
     done
 
-    if [[ "$skip_build" == "true" ]]; then
-        echo "  Skipping build (--no-build)."
-    else
-        echo "  Building tests for TSan..."
-        (cd "$PROJECT_ROOT" && xcodebuild -project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-          -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
-          build-for-testing 2>&1) || return 1
-    fi
-
-    local test_args=(-project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration "$(_build_config)" test-without-building \
-      -enableThreadSanitizer YES)
-
-    if [[ -n "$test_filter" ]]; then
-        test_args+=(-only-testing "$TEST_TARGET/$test_filter")
-        echo "  Running TSan tests filtered by '$test_filter' (timeout: ${test_timeout}s)..."
-    else
-        echo "  Running TSan tests... (timeout: ${test_timeout}s)"
-    fi
-
-    _terminate_app
-
-    (cd "$PROJECT_ROOT" && _run_tests_with_watchdog "$test_timeout" "${test_args[@]}")
-}
-
-do_test() {
-    _detect_project_config
-    _check_core_tools
-    _set_mode_sim
-    _validate_sim_target
-    _ensure_project
-    echo "Testing $PROJECT_NAME on $SIM_NAME ($SIM_OS)."
-    if [[ "${TOOLKIT_SERVER_ENABLED:-false}" == "true" ]]; then
+    if [[ "$build_only" != "true" && "${TOOLKIT_SERVER_ENABLED:-false}" == "true" ]]; then
         _require_server
     fi
-
-    local test_filter=""
-    local test_timeout=$TEST_TIMEOUT
-    local skip_build=false
-    for arg in "$@"; do
-        if [[ "$arg" =~ ^[0-9]+$ ]]; then
-            test_timeout="$arg"
-        elif [[ "$arg" == "--no-build" ]]; then
-            skip_build=true
-        else
-            test_filter="$arg"
-        fi
-    done
 
     if [[ "$skip_build" == "true" ]]; then
         echo "  Skipping build (--no-build)."
@@ -1626,9 +1599,14 @@ do_test() {
           -destination "$_TARGET_DEST" -configuration "$(_build_config)" $(_testability_setting) \
           build-for-testing 2>&1) || return 1
     fi
+    if [[ "$build_only" == "true" ]]; then
+        echo "✓ Tests build"
+        return 0
+    fi
 
     local test_args=(-project "$PROJECT_NAME.xcodeproj" -scheme "$SCHEME_NAME" -sdk "$_TARGET_SDK" \
-      -destination "$_TARGET_DEST" -configuration "$(_build_config)" test-without-building)
+      -destination "$_TARGET_DEST" -configuration "$(_build_config)" test-without-building \
+      ${extra[@]+"${extra[@]}"})
 
     if [[ -n "$test_filter" ]]; then
         test_args+=(-only-testing "$TEST_TARGET/$test_filter")
@@ -1640,6 +1618,14 @@ do_test() {
     _terminate_app
 
     (cd "$PROJECT_ROOT" && _run_tests_with_watchdog "$test_timeout" "${test_args[@]}")
+}
+
+do_test() {
+    _run_unit_tests "" -- "$@"
+}
+
+do_tsan_test() {
+    _run_unit_tests "Thread Sanitizer" -enableThreadSanitizer YES -- "$@"
 }
 
 # ── Architecture lint gates ──────────────────────────────────────────
@@ -1657,7 +1643,6 @@ _allow_filter() {
 }
 
 do_override_syntax_check() {
-    local src="$PROJECT_ROOT/$SOURCE_DIR"
     local found=0
     local line rest rule reason
     while IFS= read -r line; do
@@ -1674,7 +1659,7 @@ do_override_syntax_check() {
             echo "  ✗ override missing reason: ${line#$PROJECT_ROOT/}"
             found=1
         fi
-    done < <(grep -rn '// lint:allow' "$src" --include="*.swift" 2>/dev/null || true)
+    done < <(grep -rn '// lint:allow' "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null || true)
     if [[ $found -eq 1 ]]; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1688,9 +1673,8 @@ do_override_syntax_check() {
 }
 
 do_any_check() {
-    local src="$PROJECT_ROOT/$SOURCE_DIR"
     local violations
-    violations=$(grep -rnE 'as\?[[:space:]]*Any\b|as![[:space:]]*Any\b|\[Any\]' "$src" --include="*.swift" 2>/dev/null || true)
+    violations=$(grep -rnE 'as\?[[:space:]]*Any\b|as![[:space:]]*Any\b|\[Any\]' "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null || true)
     if [[ -n "$violations" ]]; then
         echo ""
         echo "  ✗ Any type erasure — casts to Any, force-casts to Any, and [Any] collections erase type information"
@@ -1771,13 +1755,12 @@ do_view_state_mutation_check() {
 }
 
 do_state_check() {
-    local src="$PROJECT_ROOT/$SOURCE_DIR"
     local found=0
 
     _state_grep() {
         local pattern="$1" msg="$2"
         local matches
-        matches=$(grep -rn "$pattern" "$src" --include="*.swift" 2>/dev/null || true)
+        matches=$(grep -rn "$pattern" "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null || true)
         if [[ -n "$matches" ]]; then
             echo ""
             echo "  ✗ $msg"
@@ -1806,7 +1789,7 @@ do_state_check() {
     fi
 
     local state_matches
-    state_matches=$(grep -rn '@State' "$src" --include="*.swift" 2>/dev/null | grep -v '// non-actionable:' || true)
+    state_matches=$(grep -rn '@State' "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null | grep -v '// non-actionable:' || true)
     if [[ -n "$state_matches" ]]; then
         echo ""
         echo "  ✗ @State — add // non-actionable: <reason> on the same line, or move to the central state class"
@@ -1934,32 +1917,42 @@ do_concurrency_check() {
     echo "✓ Concurrency check passed"
 }
 
-do_paper_duplicate_check() {
-    local view_src="$PROJECT_ROOT/$SOURCE_DIR/view"
-    local matches
-    matches=$(grep -rn 'Color(red: 0\.957, green: 0\.941, blue: 0\.902)' "$view_src" --include="*.swift" 2>/dev/null | grep -v 'view/PreviewSupport.swift' || true)
+# The forms a line uses to explain a departure from a rule. Each needs its
+# reason after the colon.
+ANNOTATION_FORMS='non-actionable concurrent-safe ios-only'
 
+do_annotation_reason_check() {
+    local forms matches
+    forms=$(echo "$ANNOTATION_FORMS" | tr ' ' '|')
+    matches=$(grep -rnE "// (${forms}):[[:space:]]*\$" "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null || true)
     if [[ -n "$matches" ]]; then
         echo ""
-        echo "  ✗ Hardcoded feedPaper duplicate — use the token, not the literal"
+        echo "  ✗ Annotation without a reason"
         while IFS= read -r line; do
             echo "    ${line#$PROJECT_ROOT/}"
         done <<< "$matches"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Color(red: 0.957, green: 0.941, blue: 0.902) is #F4F0E6 = settings.feedPaper."
-        echo "  Production code: state.settings.feedPaper."
-        echo "  #Preview backdrops: PreviewPaper.fill (ios/Turn/view/PreviewSupport.swift)."
-        echo "  This gate has no override — use the token."
+        echo "  Write the reason after the colon, e.g. // ios-only: AVAudioSession needs this."
+        echo "  Forms: $ANNOTATION_FORMS"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         return 1
     fi
-    echo "✓ feedPaper duplicate check passed"
+    echo "✓ Annotation reasons passed"
+}
+
+# The project's own checks: TOOLKIT_LINT_HOOK (default lint.sh in the
+# project) runs after the toolkit's gates when it exists, with PROJECT_ROOT
+# and SOURCE_DIR set. A non-zero exit fails the lint.
+do_project_lint_hook() {
+    local hook="$PROJECT_ROOT/${TOOLKIT_LINT_HOOK:-lint.sh}"
+    [[ -f "$hook" ]] || return 0
+    PROJECT_ROOT="$PROJECT_ROOT" SOURCE_DIR="$SOURCE_DIR" bash "$hook"
 }
 
 do_structure_check() {
     do_override_syntax_check || return 1
     do_any_check || return 1
-    do_paper_duplicate_check || return 1
+    do_annotation_reason_check || return 1
     do_message_bus_check || return 1
     do_view_state_mutation_check || return 1
     do_mark_spacing_check || return 1
@@ -1969,10 +1962,9 @@ do_structure_check() {
 }
 
 do_try_check() {
-    local src="$PROJECT_ROOT/$SOURCE_DIR"
     local violations
 
-    violations=$(grep -rn 'try?' "$src" --include="*.swift" 2>/dev/null | grep -v '[a-zA-Z]try?' | grep -v '// non-actionable:' || true)
+    violations=$(grep -rn 'try?' "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null | grep -v '[a-zA-Z]try?' | grep -v '// non-actionable:' || true)
 
     if [[ -n "$violations" ]]; then
         echo ""
@@ -2054,7 +2046,7 @@ do_section_marker_check() {
 
     while IFS= read -r line; do
         violations+="  dash not allowed: ${line#$PROJECT_ROOT/}"$'\n'
-    done < <(grep -rn '// MARK: -' "$PROJECT_ROOT/$SOURCE_DIR" --include="*.swift" 2>/dev/null || true)
+    done < <(grep -rn '// MARK: -' "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null || true)
 
     if [[ -n "$violations" ]]; then
         echo ""
@@ -2301,23 +2293,37 @@ do_lint() {
         do_arch_checks || return 1
     else
         do_try_check || return 1
+        do_annotation_reason_check || return 1
     fi
+    do_project_lint_hook || return 1
 }
 
+# The project's .swiftlint.yml covers the app. A test or debug-script folder
+# is linted when it has a .swiftlint.yml of its own (with `included: [.]`),
+# which changes the project's rules for that folder.
 _swiftlint_check() {
-    local output
-    local exit_code
-    local lint_args=(--strict --quiet)
-    if [[ -n "$SWIFTLINT_CONFIG" ]]; then
-        lint_args+=(--config "$SWIFTLINT_CONFIG")
-    fi
     local cache_dir="$PROJECT_ROOT/build/.swiftlint-cache"
     mkdir -p "$cache_dir"
-    lint_args+=(--cache-path "$cache_dir")
-    output=$(cd "$PROJECT_ROOT" && swiftlint "${lint_args[@]}" 2>&1) && exit_code=0 || exit_code=$?
-    if [[ $exit_code -ne 0 ]] || echo "$output" | grep -qiE "warning:|error:"; then
+    local base_args=(--strict --quiet --cache-path "$cache_dir")
+    local -a runs=("")
+    local dir
+    for dir in ${LINT_EXTRA_DIRS[@]+"${LINT_EXTRA_DIRS[@]}"}; do
+        [[ -f "$PROJECT_ROOT/$dir/.swiftlint.yml" ]] && runs+=("$PROJECT_ROOT/$dir/.swiftlint.yml")
+    done
+    local output="" run_output exit_code failed=false child
+    for child in "${runs[@]}"; do
+        local lint_args=("${base_args[@]}")
+        [[ -n "$SWIFTLINT_CONFIG" ]] && lint_args+=(--config "$SWIFTLINT_CONFIG")
+        [[ -n "$child" ]] && lint_args+=(--config "$child")
+        run_output=$(cd "$PROJECT_ROOT" && swiftlint "${lint_args[@]}" 2>&1) && exit_code=0 || exit_code=$?
+        if [[ $exit_code -ne 0 ]] || echo "$run_output" | grep -qiE "warning:|error:"; then
+            failed=true
+        fi
+        [[ -n "$run_output" ]] && output+="$run_output"$'\n'
+    done
+    if $failed; then
         echo "✗ Lint failed:"
-        [[ -n "$output" ]] && echo "$output"
+        [[ -n "$output" ]] && printf '%s' "$output"
         echo "✗ Lint failed — fix violations before building."
         return 1
     fi
@@ -2328,7 +2334,7 @@ do_format_check() {
     _require_cmd swiftformat "Install with: brew install swiftformat"
     local log
     log=$(mktemp)
-    if (cd "$PROJECT_ROOT" && swiftformat --lint "$SOURCE_DIR/" > "$log" 2>&1); then
+    if (cd "$PROJECT_ROOT" && swiftformat "$SOURCE_DIR/" ${LINT_EXTRA_DIRS[@]+"${LINT_EXTRA_DIRS[@]}"} --lint > "$log" 2>&1); then
         rm -f "$log"
         echo "✓ Format check passed"
     else
@@ -2343,7 +2349,7 @@ do_format() {
     _require_cmd swiftformat "Install with: brew install swiftformat"
     local log
     log=$(mktemp)
-    if (cd "$PROJECT_ROOT" && swiftformat "$SOURCE_DIR/" > "$log" 2>&1); then
+    if (cd "$PROJECT_ROOT" && swiftformat "$SOURCE_DIR/" ${LINT_EXTRA_DIRS[@]+"${LINT_EXTRA_DIRS[@]}"} > "$log" 2>&1); then
         rm -f "$log"
         echo "✓ Format passed"
     else
@@ -2354,16 +2360,21 @@ do_format() {
     fi
 }
 
+# Periphery builds the scheme itself; without a destination xcodebuild picks
+# one, which can be a connected phone that needs signing. It builds for the
+# simulator the other commands use.
 do_unused() {
     _require_cmd periphery "Install with: brew install periphery"
+    _set_mode_sim
+    _validate_sim_target
     _ensure_project
     local log
     log=$(mktemp)
-    local periphery_args=(scan --strict)
+    local periphery_args=(scan --strict --disable-update-check)
     if [[ -n "$PERIPHERY_CONFIG" ]]; then
         periphery_args+=(--config "$PERIPHERY_CONFIG")
     fi
-    periphery_args+=(--project "$PROJECT_NAME.xcodeproj" --schemes "$SCHEME_NAME")
+    periphery_args+=(--project "$PROJECT_NAME.xcodeproj" --schemes "$SCHEME_NAME" -- -destination "$_TARGET_DEST")
     local exit_code
     (cd "$PROJECT_ROOT" && periphery "${periphery_args[@]}" > "$log" 2>&1) && exit_code=0 || exit_code=$?
     if [[ $exit_code -ne 0 ]] || grep -qiE "found [1-9]|\.swift:[0-9]+|is unused|are unused|warning:|error:" "$log"; then
@@ -2408,9 +2419,8 @@ do_analyze() {
 }
 
 do_override_audit() {
-    local src="$PROJECT_ROOT/$SOURCE_DIR"
     local matches
-    matches=$(grep -rn '// lint:allow' "$src" --include="*.swift" 2>/dev/null || true)
+    matches=$(grep -rn '// lint:allow' "${CODE_DIRS[@]}" --include="*.swift" 2>/dev/null || true)
     echo "── lint:allow overrides ──"
     if [[ -z "$matches" ]]; then
         echo "  (none)"
@@ -2511,13 +2521,10 @@ do_doctor() {
     fi
 
     local device_info device_count
-    device_info=$(xcrun devicectl list devices 2>/dev/null | grep -v "Name\|^--" || true)
-    device_count=$(echo "$device_info" | grep -c . || true)
+    device_info=$(_physical_devices)
+    device_count=$(printf '%s' "$device_info" | grep -c . || true)
     if [[ "$device_count" -eq 1 ]]; then
-        local dev_udid dev_name
-        dev_udid=$(echo "$device_info" | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[A-F0-9]{8}-[A-F0-9]{16}|[A-F0-9]{24}|[A-F0-9]{40}' | head -1)
-        dev_name=$(echo "$device_info" | sed -E "s/ *${dev_udid}.*//" | sed 's/^ *//;s/ *$//' | sed -E 's/ +[^ ]+\.coredevice\.local//')
-        echo "  ✓ Device: $dev_name ($dev_udid)"
+        echo "  ✓ Device: $(echo "$device_info" | cut -d'|' -f2 | xargs) ($(echo "$device_info" | cut -d'|' -f1 | xargs))"
     elif [[ "$device_count" -gt 1 ]]; then
         echo "  ℹ $device_count devices detected — use --device or IOS_DEVICE to select one"
     else
@@ -2704,6 +2711,23 @@ _level_grep() {
     esac
 }
 
+# A compact-style log line as "<time>  <message>". The [subsystem:category]
+# label stays on other loggers' lines and goes on the app's own.
+_compact_log_format() {
+    sed -l -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [A-Za-z]+ +[^ ]+ /\1  /' \
+        -e "s/^([0-9:.]+  )\[${BUNDLE_ID//./\\.}[^]]*\] /\1/"
+}
+
+# The app's own log lines from the phone, live, as "<time>  <message>". The
+# syslog relay idevicesyslog reads carries only default level and up, which
+# drops every info and debug line; the activity stream carries them all.
+# Its subsystem filter keeps the app's and its extensions' loggers.
+_device_log_stream() {
+    _require_cmd pymobiledevice3 "Install with: uv tool install pymobiledevice3"
+    pymobiledevice3 syslog live --udid "$DEVICE_UDID" --subsystem "${BUNDLE_ID}*" 2>/dev/null \
+        | sed -l -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{3})?)[0-9]* [^<]*<[A-Z_]+>: /\1  /'
+}
+
 _ios_logs() {
     _detect_project_config
     if [[ "${TOOLKIT_LOGS_ENABLED:-true}" != "true" ]]; then
@@ -2766,22 +2790,21 @@ _ios_logs() {
         tail)
             case "$_TARGET_SDK" in
                 iphoneos)
-                    _require_cmd idevicesyslog "Install with: brew install libimobiledevice"
                     if [[ -n "$cat_filter" ]]; then
                         echo "→ Streaming device logs (filter: $cat_filter, Ctrl-C to stop)..."
-                        idevicesyslog -u "$DEVICE_UDID" 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        _device_log_stream | grep -F --line-buffered "[${cat_filter}]" | _level_grep "$level_filter"
                     else
                         echo "→ Streaming device logs (Ctrl-C to stop)..."
-                        idevicesyslog -u "$DEVICE_UDID" 2>/dev/null | grep -E --line-buffered " ${APP_EXECUTABLE}\[[0-9]+\] " | while IFS= read -r line; do echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        _device_log_stream | _level_grep "$level_filter"
                     fi
                     ;;
                 iphonesimulator)
                     if [[ -n "$cat_filter" ]]; then
                         echo "→ Streaming sim logs (filter: $cat_filter, Ctrl-C to stop)..."
-                        xcrun simctl spawn "$SIM_ID" log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -F --line-buffered "[${cat_filter}]" | while IFS= read -r line; do echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | grep -F --line-buffered "[${cat_filter}]" | _compact_log_format | _level_grep "$level_filter"
                     else
                         echo "→ Streaming sim logs (Ctrl-C to stop)..."
-                        xcrun simctl spawn "$SIM_ID" log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | while IFS= read -r line; do echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /'; done | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log stream --predicate "process == \"$APP_EXECUTABLE\"" --style compact 2>/dev/null | _compact_log_format | _level_grep "$level_filter"
                     fi
                     ;;
             esac
@@ -2816,9 +2839,9 @@ _ios_logs() {
                         return 1
                     fi
                     if [[ -n "$cat_filter" ]]; then
-                        log show "$archive" --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        log show "$archive" --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | grep -F "[${cat_filter}]" | tail -n "$lines" | _compact_log_format | _level_grep "$level_filter"
                     else
-                        log show "$archive" --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        log show "$archive" --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact 2>/dev/null | grep -vxF -e "==========" -e "$archive" | tail -n "$lines" | _compact_log_format | _level_grep "$level_filter"
                     fi
                     rm -rf "$archive_dir"
                     ;;
@@ -2829,9 +2852,9 @@ _ios_logs() {
                     fi
                     echo "→ ${desc}:"
                     if [[ -n "$cat_filter" ]]; then
-                        xcrun simctl spawn "$SIM_ID" log show --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact --last "${minutes}m" 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact --last "${minutes}m" 2>/dev/null | grep -F "[${cat_filter}]" | tail -n "$lines" | _compact_log_format | _level_grep "$level_filter"
                     else
-                        xcrun simctl spawn "$SIM_ID" log show --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact --last "${minutes}m" 2>/dev/null | tail -n "$lines" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /' | _level_grep "$level_filter"
+                        xcrun simctl spawn "$SIM_ID" log show --info ${predicate_args[@]+"${predicate_args[@]}"} --style compact --last "${minutes}m" 2>/dev/null | tail -n "$lines" | _compact_log_format | _level_grep "$level_filter"
                     fi
                     ;;
             esac
@@ -2922,7 +2945,7 @@ _ios_debug() {
         _clear_scriptor_marker
         # Simulator: inject names at launch via SIMCTL_CHILD_ so config.swift stays untouched
         # and subsequent script runs reuse the incremental build (no rebuild).
-        export SIMCTL_CHILD_TURN_DEBUG_SCRIPT_NAMES="$script_names"
+        export "SIMCTL_CHILD_${DEBUG_ENV_PREFIX}_DEBUG_SCRIPT_NAMES=$script_names"
         # SCRIPT_ENV_<NAME> (from build.properties.local or the shell) reaches
         # the scripts as <NAME>, e.g. a test account's login.
         local script_var
@@ -2931,7 +2954,7 @@ _ios_debug() {
         done
         # `signin <email> <code>` wins over the file's account.
         if [[ -n "${_SIGNIN_EMAIL:-}" ]]; then
-            export SIMCTL_CHILD_TURN_LOGIN_EMAIL="$_SIGNIN_EMAIL" SIMCTL_CHILD_TURN_LOGIN_CODE="$_SIGNIN_CODE"
+            export "SIMCTL_CHILD_${DEBUG_ENV_PREFIX}_LOGIN_EMAIL=$_SIGNIN_EMAIL" "SIMCTL_CHILD_${DEBUG_ENV_PREFIX}_LOGIN_CODE=$_SIGNIN_CODE"
         fi
     fi
     case "$_TARGET_SDK" in
@@ -2944,8 +2967,8 @@ _ios_debug() {
                     environment+="        \"${env_var#SCRIPT_ENV_}\": \"$(_swift_escape "${!env_var}")\","$'\n'
                 done
                 if [[ -n "${_SIGNIN_EMAIL:-}" ]]; then
-                    environment+="        \"TURN_LOGIN_EMAIL\": \"$(_swift_escape "$_SIGNIN_EMAIL")\","$'\n'
-                    environment+="        \"TURN_LOGIN_CODE\": \"$(_swift_escape "$_SIGNIN_CODE")\","$'\n'
+                    environment+="        \"${DEBUG_ENV_PREFIX}_LOGIN_EMAIL\": \"$(_swift_escape "$_SIGNIN_EMAIL")\","$'\n'
+                    environment+="        \"${DEBUG_ENV_PREFIX}_LOGIN_CODE\": \"$(_swift_escape "$_SIGNIN_CODE")\","$'\n'
                 fi
                 if [[ -n "$environment" ]]; then
                     environment="["$'\n'"$environment    ]"
@@ -2961,7 +2984,7 @@ enum DebugScriptConfig {
     static let compileTimeEnvironment: [String: String] = $environment
 
     static var names: String {
-        ProcessInfo.processInfo.environment["TURN_DEBUG_SCRIPT_NAMES"] ?? compileTimeNames
+        ProcessInfo.processInfo.environment["${DEBUG_ENV_PREFIX}_DEBUG_SCRIPT_NAMES"] ?? compileTimeNames
     }
 
     /// The launch environment, with what a phone run compiled in.
@@ -2972,12 +2995,10 @@ enum DebugScriptConfig {
 #endif
 EOF
             fi
-            _require_cmd idevicesyslog "Install with: brew install libimobiledevice"
-            local fifo syslog_pid pipe_pid reader_pid
+            local fifo pipe_pid reader_pid
             fifo=$(mktemp -u)
             mkfifo "$fifo"
-            idevicesyslog 2>/dev/null | grep --line-buffered "$APP_EXECUTABLE" > "$fifo" &
-            syslog_pid=$!
+            _device_log_stream > "$fifo" &
             pipe_pid=$!
             echo ""
             if [[ -n "$cat_filter" ]]; then
@@ -2991,7 +3012,7 @@ EOF
                 while true; do
                     if read -r -t 2 line; then
                         if [[ -z "$cat_filter" ]] || [[ "$line" == *"[${cat_filter}]"* ]] || [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
-                            formatted=$(echo "$line" | sed -E 's/^[A-Z][a-z]{2} [0-9]+ ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) .*<[^>]+>: /\1  /')
+                            formatted="$line"
                             if [[ -n "$level_filter" ]]; then
                                 level_token="${formatted#*  }"
                                 level_token="${level_token%% *}"
@@ -3009,7 +3030,7 @@ EOF
                         fi
                         app_launched=true
                     elif $app_launched; then
-                        if ! pgrep -x "$APP_EXECUTABLE" > /dev/null 2>&1; then
+                        if ! _app_running; then
                             break
                         fi
                     fi
@@ -3021,6 +3042,7 @@ EOF
                 _write_scriptor_marker
             fi
             wait "$reader_pid" 2>/dev/null || true
+            pkill -P "$pipe_pid" 2>/dev/null || true
             kill -9 "$pipe_pid" 2>/dev/null; { wait "$pipe_pid"; } 2>/dev/null || true
             rm -f "$fifo" 2>/dev/null || true
             ;;
@@ -3037,7 +3059,7 @@ EOF
             elif [[ -n "$cat_filter" ]]; then
                 echo "→ Debug session started (filter: $cat_filter). Go to home screen to stop."
             else
-                echo "→ Debug session started (Turn logger only). Go to home screen to stop."
+                echo "→ Debug session started (the app's own log lines). Go to home screen to stop."
             fi
             echo ""
 
@@ -3059,12 +3081,12 @@ EOF
                 elif [[ -n "$cat_filter" ]]; then
                     [[ "$line" == *"[${cat_filter}]"* ]] && show=true
                 else
-                    [[ "$line" == *"[turn]"* || "$line" == *":turn]"* ]] && show=true
+                    [[ "$line" == *"[${BUNDLE_ID}"* ]] && show=true
                 fi
                 [[ "$line" == *"DEBUG_SESSION_ENDED"* ]] && show=true
 
                 if $show; then
-                    formatted=$(echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+) [^ ]+ [^ ]+ <[^>]+>: /\1  /')
+                    formatted=$(echo "$line" | _compact_log_format)
                     if [[ -n "$level_filter" ]]; then
                         level_token="${formatted#*  }"
                         level_token="${level_token%% *}"
@@ -3087,6 +3109,42 @@ EOF
     esac
     echo ""
     echo "✓ App backgrounded — session ended."
+}
+
+# signin|signout [simulator|<name|udid>] [email code]: runs the project's
+# sign_in or sign_out debug script on a simulator, without rebuilding.
+# Another account than build.properties.local's comes as <email> <code>.
+_sign_in_or_out() {
+    local script="$1" target="simulator"
+    shift
+    if [[ $# -gt 0 && "$1" != *@* ]]; then
+        if [[ "$1" != "simulator" ]] && ! _use_named_simulator "$1"; then
+            echo "✗ '$1' is not a simulator. signin and signout take simulator, or a simulator's name or UDID."
+            return 1
+        fi
+        target="$1"
+        shift
+    fi
+    if [[ "$script" == "sign_in" && $# -ge 2 ]]; then
+        _SIGNIN_EMAIL="$1"
+        _SIGNIN_CODE="$2"
+    fi
+    _ios_debug "$target" --no-build --script "$script"
+}
+
+# Read-only: the team's bundle ids under this app's, their capabilities and
+# provisioning profiles, from the App Store Connect API. Other prefixes can
+# be given instead.
+do_portal() {
+    _require_cmd uv "Install with: brew install uv"
+    local key_path="${IOS_KEY_PATH:-$PROJECT_ROOT/AuthKey.p8}"
+    if [[ -z "${IOS_KEY_ID:-}" || -z "${IOS_ISSUER_ID:-}" || ! -f "$key_path" ]]; then
+        echo "✗ The portal check needs IOS_KEY_ID and IOS_ISSUER_ID in build.properties and the key at $key_path."
+        return 1
+    fi
+    local -a prefixes=("$@")
+    [[ ${#prefixes[@]} -eq 0 ]] && prefixes=("$BUNDLE_ID")
+    uv run --quiet --script "$SCRIPT_DIR/lib/portal_check.py" "$IOS_KEY_ID" "$IOS_ISSUER_ID" "$key_path" "${prefixes[@]}"
 }
 
 # ── Dispatch ────────────────────────────────────────────────────────
@@ -3113,7 +3171,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     build              Lint → format → incremental build
     clean              Clean build artifacts
     install [target] [--quiet|-q]   Build + launch (--quiet skips opening Device Hub)
-    launch [target] -- [args...]    Launch installed app, forwarding args (e.g. -turnLaunch personDetail)
+    launch [target] -- [args...]    Launch installed app, forwarding args to it
     uninstall [target] Stop watcher + app + uninstall
     watch [target] [mode]  Build + launch + auto-redeploy (mode: swift|build, default: swift)
     screenshot [target] [name]
@@ -3142,11 +3200,17 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
                        vision model (--focus optional)
     ui <command>       Drive the simulator UI (baguette): tap | swipe | type | press | describe
                        ('./build.sh ios ui' shows the full help; simulator only)
-    test [filter] [timeout] [--no-build]   Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT); --no-build skips the build
-    tsan-test [filter] [timeout] [--no-build]   Run unit tests with ThreadSanitizer; same as test
-    lint               Run SwiftLint on all Swift sources
-    format             Auto-format all Swift sources with SwiftFormat
-    unused             Scan for unused code with Periphery
+    test [filter] [timeout] [--no-build|--build-only]
+                       Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT).
+                       --no-build skips the build; --build-only builds the tests without running them
+                       (and without the local server)
+    tsan-test [filter] [timeout] [--no-build|--build-only]   Run unit tests with ThreadSanitizer; same as test
+    lint               SwiftLint, SwiftFormat and the toolkit's gates on the app, its tests and
+                       debug scripts, then the project's own lint.sh if it has one
+    format             Auto-format the app, its tests and debug scripts with SwiftFormat
+    unused             Scan for unused code with Periphery (builds for the simulator)
+    portal [prefix...] Read-only: bundle ids, their capabilities and profiles from the
+                       App Store Connect API (default prefix: the app's bundle id)
     analyze            Run Xcode static analyzer (memory, logic, dead stores)
     audit              Run all analysis tools: lint + format-check + unused + analyze
     doctor             Check local build prerequisites
@@ -3156,8 +3220,12 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     logs [target] [--cat <cat>] [--level <level>] tail  Stream live app logs
     debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build]
                          Build (or with --no-build, just relaunch), launch, and trace logs (auto-stop on background)
-    signin [email code]  Sign the simulator in with SCRIPT_ENV_TURN_LOGIN_EMAIL / _CODE from build.properties.local, or with the given account and its fixed code (runs the sign_in script)
-    signout              Sign the simulator out (runs the sign_out script)
+    signin [simulator|<name|udid>] [email code]
+                       Sign a simulator in with SCRIPT_ENV_<PROJECT>_LOGIN_EMAIL / _CODE from
+                       build.properties.local, or with the given account and its fixed code
+                       (runs the sign_in debug script, no rebuild)
+    signout [simulator|<name|udid>]
+                       Sign a simulator out (runs the sign_out debug script)
 
   Online (enable via setup / build.properties):
     e2e              Run UI tests against a configured server (TOOLKIT_E2E_ENABLED)
@@ -3286,15 +3354,9 @@ _dispatch() {
         logs)     shift; _ios_logs "$@" ;;
         profile)  shift; do_profile "$@" ;;
         debug)    shift; _ios_debug "$@" ; exit 0 ;;
-        signin)
-            shift
-            # Another account than build.properties.local's: signin <email> <code>.
-            if [[ $# -ge 2 ]]; then
-                _SIGNIN_EMAIL="$1"
-                _SIGNIN_CODE="$2"
-            fi
-            _ios_debug simulator --no-build --script sign_in ; exit 0 ;;
-        signout)  _ios_debug simulator --no-build --script sign_out ; exit 0 ;;
+        signin)   shift; _sign_in_or_out sign_in "$@" ; exit 0 ;;
+        signout)  shift; _sign_in_or_out sign_out "$@" ; exit 0 ;;
+        portal)   shift; do_portal "$@" ;;
         *)        usage ;;
     esac
 }

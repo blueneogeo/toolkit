@@ -49,7 +49,7 @@ do_profile() {
     # Interest); --render adds the render server and GPU frame times.
     [[ "$render" == true ]] && args+=(--instrument "Hitches" --instrument "GPU")
     if [[ -n "$scripts" ]]; then
-        args+=(--env "TURN_DEBUG_SCRIPT_NAMES=$scripts" --env "TURN_DEBUG_SCRIPT_NO_MARKER=1")
+        args+=(--env "${DEBUG_ENV_PREFIX}_DEBUG_SCRIPT_NAMES=$scripts" --env "${DEBUG_ENV_PREFIX}_DEBUG_SCRIPT_NO_MARKER=1")
     fi
     args+=(--launch -- "$BUNDLE_ID")
 

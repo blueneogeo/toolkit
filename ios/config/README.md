@@ -49,6 +49,24 @@ Auto-detected from `project.yml` / the `.xcodeproj` unless overridden: project n
 scheme, app name, source dir, bundle id, test target. Lint/format configs
 (`.swiftlint.yml`, `.periphery.yml`) are found by searching upward from the toolkit.
 
+### What lint covers
+
+`lint` (and every build) checks the app's source folder, the test target's folder and
+the debug-script folder (`TOOLKIT_LINT_EXTRA_DIRS`, default `<Test target> debug`).
+
+- SwiftFormat formats and checks all of them.
+- SwiftLint lints the app with the project's `.swiftlint.yml`. A test or debug-script
+  folder is linted when it has a `.swiftlint.yml` of its own with `included: [.]`;
+  its rules are added to the project's (for example `disabled_rules` for that folder).
+  Exclude that file from the target's sources in `project.yml`, or XcodeGen copies it
+  into the bundle.
+- The gates that are not about the app's architecture (`try?`, `Any`, the property
+  wrappers, `lint:allow` syntax, MARK dashes and annotation reasons) cover all of them.
+  The architecture and concurrency gates cover the app only.
+- Last, the project's own checks: `lint.sh` in the project (or `TOOLKIT_LINT_HOOK`) runs
+  when it exists, with `PROJECT_ROOT` and `SOURCE_DIR` set. A non-zero exit fails lint.
+  Checks that name one project's types or values go there, not in the toolkit.
+
 ### Feature flags (all offline-safe)
 
 | Flag | Default | Enables |
@@ -71,6 +89,7 @@ When `TOOLKIT_ARCH_CHECKS=true`, `lint` and every build additionally enforce:
 - `do_handler_suffix_check` — `on<Subject><Event>` with an approved suffix list
 - `do_mark_spacing_check` — blank-line padding around `// MARK:`
 - `do_try_check` — no unjustified `try?` (requires `// non-actionable:`)
+- `do_annotation_reason_check` — `// non-actionable:`, `// concurrent-safe:` and `// ios-only:` each carry a reason after the colon
 - `do_handler_visibility_check` — handlers (`on<Subject><Event>`) must not be `private`; private imperative work is an action
 - `do_observable_class_check` — `@Observable` must annotate a `@MainActor final class`
 - `do_root_immutability_check` — the composition-root file declares no `var` (only `let` instances/resources)
@@ -144,7 +163,7 @@ app on the connected phone or the booted simulator. It then prints a summary:
 - sampled CPU per thread, the heaviest functions, and the app's own hot code.
 
 `--script` launches the app with those debug scripts running immediately, skipping
-the start-up marker wait (`TURN_DEBUG_SCRIPT_NO_MARKER=1`), so a scripted
+the start-up marker wait (`<PROJECT>_DEBUG_SCRIPT_NO_MARKER=1`), so a scripted
 interaction is measured end to end. Traces are kept in `build/traces/` so you can
 open them in Instruments.
 
@@ -158,8 +177,8 @@ Notes:
 ## Commands
 
 `setup [--force] [--renew-profiles]` · `update-toolkit` · `configure` · `build` · `clean` · `install [target] [--quiet|-q]` · `uninstall [target]` · `watch [target] [mode]` ·
-`test [filter] [timeout] [--no-build]` · `tsan-test [filter] [timeout]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` ·
-`logs [--cat] [--level] [N|tail]` · `debug [target] [--cat] [--level] [--script <names>] [--no-build]` · `signin` · `signout` · `e2e` · `e2e-run` ·
+`test [filter] [timeout] [--no-build|--build-only]` · `tsan-test [filter] [timeout] [--no-build|--build-only]` · `lint` · `format` · `unused` · `analyze` · `audit` · `doctor` · `portal [prefix...]` ·
+`logs [target] [--cat] [--level] [N|tail]` · `debug [target] [--cat] [--level] [--script <names>] [--no-build]` · `signin [simulator|<name|udid>] [email code]` · `signout [simulator|<name|udid>]` · `e2e` · `e2e-run` ·
 `screenshot [target] [name]` · `screenshots collect` · `see [target] [--focus <q>]` · `ui <cmd>` ·
 `profile [target] [--script] [--seconds] [--render] [--template] [--name]` ·
 `upload [--force] <text>` · `sentry <cmd>` · `[--server]` · `[--config <name>]`
@@ -176,7 +195,23 @@ with no target they prefer a connected phone and fall back to the simulator.
   simulator, `debug` reads the simulator's own log stream at debug level and writes the
   script marker only once that stream is listening, so a script that ends at once is
   still heard and the session stops on `DEBUG_SESSION_ENDED`.
-- `signin` / `signout` run the project's `sign_in` / `sign_out` debug scripts on the
-  simulator without rebuilding (`debug simulator --no-build --script sign_in`).
+- `signin` / `signout` run the project's `sign_in` / `sign_out` debug scripts on a
+  simulator without rebuilding (`debug simulator --no-build --script sign_in`). They take
+  `simulator` or a simulator's name or UDID.
+- Debug scripts read their names from `<PROJECT>_DEBUG_SCRIPT_NAMES` and a sign-in from
+  `<PROJECT>_LOGIN_EMAIL` / `_CODE`, where `<PROJECT>` is the project name in capitals
+  (`TOOLKIT_DEBUG_ENV_PREFIX` overrides it).
+- `test --build-only` builds the tests without running them, and needs no local server.
+- `unused` runs Periphery, which builds the scheme for the simulator the other commands use.
+- `portal` lists the team's bundle ids that start with the app's (or the given prefixes),
+  their capabilities and provisioning profiles, read-only, from the App Store Connect API.
+  It uses `IOS_KEY_ID`, `IOS_ISSUER_ID` and `AuthKey.p8` (`IOS_KEY_PATH`), and runs
+  `lib/portal_check.py` with `uv run`.
+- `logs device tail` and `debug device` stream the phone's log with `pymobiledevice3 syslog
+  live`, kept to the app's subsystems (its bundle id and its extensions'). The syslog
+  relay `idevicesyslog` reads carries no info or debug lines.
+- `install` and `debug` on a simulator remove the app's old compiled Core ML models
+  (`Caches/com.apple.e5rt.e5bundlecache`). Each install moves the app, so each leaves a
+  copy that is never read again; the copies of the newest launch stay.
 `IOS_DEVICE=<name|udid>` selects which connected iPhone to use when several are present
 (a preference, not a force). Breaching commands auto-forward to the user-launched relay when `SCODE_SANDBOXED` is set; pass `--server` explicitly outside sandboxes. See `./build.sh` (no args) for full usage.

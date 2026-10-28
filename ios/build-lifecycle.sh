@@ -1,5 +1,5 @@
 # ios-toolkit/build-lifecycle.sh — generic app process/install/launch/redeploy
-# Provides: _app_running, _wait_for_app, _terminate_app, _install_app, _launch_app, _redeploy
+# Provides: _app_running, _wait_for_app, _terminate_app, _install_app, _prune_model_cache, _launch_app, _redeploy
 # Depends on: BUNDLE_ID, APP_EXECUTABLE, SIM_ID, SIM_NAME (build.sh)
 # Depends on: _TARGET_SDK, _TARGET_NAME, _TARGET_DEST, DEVICE_UDID (build.sh)
 # Depends on: _find_app, _do_build (build.sh)
@@ -83,6 +83,33 @@ _install_app() {
     esac
 }
 
+# ── Compiled model cache ────────────────────────────────────────────
+
+# Core ML compiles an app's models into Caches/com.apple.e5rt.e5bundlecache,
+# keyed by where the model lies. Every simulator install moves the app, so
+# each one leaves a copy that is never read again. The copies from the
+# newest launch (written within ten minutes of the newest one) stay.
+_prune_model_cache() {
+    local data cache newest dir mtime removed=0 freed=0 size
+    data=$(xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" data 2>/dev/null) || return 0
+    while IFS= read -r cache; do
+        newest=$(find "$cache" -mindepth 2 -maxdepth 2 -type d -exec stat -f %m {} + 2>/dev/null | sort -n | tail -1)
+        [[ -z "$newest" ]] && continue
+        while IFS= read -r dir; do
+            mtime=$(stat -f %m "$dir")
+            if (( mtime < newest - 600 )); then
+                size=$(du -sk "$dir" | cut -f1)
+                rm -rf "$dir"
+                removed=$((removed + 1))
+                freed=$((freed + size))
+            fi
+        done < <(find "$cache" -mindepth 2 -maxdepth 2 -type d)
+    done < <(find "$data/Library/Caches" -maxdepth 2 -type d -name com.apple.e5rt.e5bundlecache 2>/dev/null)
+    if (( removed > 0 )); then
+        echo "  Removed $removed old compiled model copies ($((freed / 1024)) MB)."
+    fi
+}
+
 # ── Unified launch ──────────────────────────────────────────────────
 
 # Brings Device Hub forward, where the booted simulator shows. A
@@ -99,6 +126,7 @@ _launch_app() {
             if ! xcrun simctl list devices booted | grep -q "$SIM_ID"; then
                 xcrun simctl boot "$SIM_ID"
             fi
+            _prune_model_cache
             _install_app
             # IOS_LAUNCH_ARGS adds launch arguments of the project's own
             # (e.g. one that starts the app muted) to every simulator launch.

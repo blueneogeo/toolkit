@@ -24,6 +24,9 @@
 # TOOLKIT_LOGS_ENABLED=true       # `logs` / `debug` os_log streaming
 # TOOLKIT_DEBUG_SCRIPTS=false     # allow `debug --script` injection (needs host-app ScriptRunner)
 # TOOLKIT_ARCH_CHECKS=true        # AppState architecture lint gates (state/mark/handler/try checks)
+# TOOLKIT_LINT_EXTRA_DIRS="MyAppTests debug"  # folders linted besides the app (default: test target + debug scripts)
+# TOOLKIT_LINT_HOOK=lint.sh       # the project's own lint checks, run after the toolkit's when the file exists
+# TOOLKIT_DEBUG_ENV_PREFIX=MYAPP  # prefix of the debug-script environment names (default: project name in capitals)
 
 # ── Architecture check config (used when TOOLKIT_ARCH_CHECKS=true) ──
 # TOOLKIT_STATE_CLASS=AppState          # central @Observable state class name
