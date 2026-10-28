@@ -459,10 +459,15 @@ _ensure_project() {
 
 # ── Unified build ───────────────────────────────────────────────────
 
-# The App Store Connect API key, when configured, lets automatic signing
-# fetch a new profile (after a capability is added) without an Apple
-# account signed in to Xcode.
+# Automatic signing uses the Apple account signed in to Xcode. Without one
+# it falls back to the App Store Connect API key, which Xcode can refuse
+# ("Authentication failed") even when the key works for the API.
+_xcode_has_account() {
+    defaults read com.apple.dt.Xcode DVTDeveloperAccountManagerAppleIDLists 2>/dev/null | grep -q "identifier ="
+}
+
 _provisioning_auth_args() {
+    _xcode_has_account && return 0
     local key_path="${IOS_KEY_PATH:-$PROJECT_ROOT/AuthKey.p8}"
     [[ -n "${IOS_KEY_ID:-}" && -n "${IOS_ISSUER_ID:-}" && -f "$key_path" ]] || return 0
     [[ "$key_path" == /* ]] || key_path="$PWD/$key_path"
@@ -580,7 +585,7 @@ _fastlane_setup() {
     [[ -n "$api_key_json" ]] && match_args+=(--api_key_path "$api_key_json")
     if [[ "${_MATCH_RENEW:-false}" == "true" ]]; then
         match_args+=(--force)
-        echo "→ Renewing the App Store provisioning profile..."
+        echo "→ Renewing the App Store provisioning profiles..."
     else
         echo "→ Syncing certificates..."
     fi
@@ -880,6 +885,24 @@ do_screenshot() {
     _capture_screenshot "$dir/$file" || return 1
     echo "✓ Screenshot saved from $(_capture_target_label)"
     echo "$(cd "$dir" && pwd)/$file"
+}
+
+# Delivers a push payload (an APNs JSON file) to the app on the booted
+# simulator. The simulator shows it directly, without running a
+# notification service extension.
+do_push() {
+    _detect_project_config
+    _check_core_tools
+    local payload="${1:-}"
+    if [[ -z "$payload" || ! -f "$payload" ]]; then
+        echo "Usage: ./build.sh ios push <payload.json>"
+        return 1
+    fi
+    local sim_id
+    sim_id=$(_ui_sim_id) || return 1
+    _set_mode_sim
+    xcrun simctl push "$sim_id" "$BUNDLE_ID" "$payload" || return 1
+    echo "✓ Push delivered to $BUNDLE_ID on the simulator"
 }
 
 do_screenshots_collect() {
@@ -3084,7 +3107,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
 
   Local dev:
     setup              First-time setup: config + generate + build + LSP config (sim only)
-                       --renew-profiles: renew the App Store profile (after adding a capability)
+                       --renew-profiles: renew the App Store profiles (after adding a capability or target)
     update-toolkit     Update the toolkit submodule to the latest version
     configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
     build              Lint → format → incremental build
@@ -3101,6 +3124,9 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     screenshots collect [simulator]
                        Copy scripted in-app screenshots out of the sim container into
                        ios/build/screenshots/ (a simulator's name or UDID picks which one)
+    push <payload.json>
+                       Deliver an APNs payload to the app on the booted simulator; it is
+                       shown directly, without running a notification service extension
     simulator <create <model>|text-size [size]>
                        Make a simulator of another model (e.g. "iPhone 13 mini"), or set
                        the booted simulator's text size (Dynamic Type).
@@ -3237,6 +3263,7 @@ _dispatch() {
         launch)   shift; do_launch "$@" ;;
         screenshot) shift; do_screenshot "$@" ;;
         screenshots) shift; do_screenshots_collect "$@" ;;
+        push) shift; do_push "$@" ;;
         see) shift; do_see "$@" ;;
         ui) shift; do_ui "$@" ;;
         simulator) shift; do_simulator "$@" ;;

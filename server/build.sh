@@ -327,6 +327,8 @@ do_test() {
         export APP_BASE_URL="$live_url"
         _require_server "$live_url/api/health"
         (cd "$PROJECT_ROOT" && go test -timeout "$timeout" -tags=live ./internal/livetest -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
+    elif [ "${1:-}" = "run" ]; then
+        (cd "$PROJECT_ROOT" && go test -timeout "$timeout" "${3:-./...}" -run "${2:?Usage: test run <pattern> [package]}" -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     else
         (cd "$PROJECT_ROOT" && go test -timeout "$timeout" ./... -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     fi
@@ -757,6 +759,7 @@ Usage: ./build.sh server [--server] <command> (--server accepted in any position
     debug        Stream raw server log lines (for combined debug)
     watch        Start + auto-rebuild on Go changes
     test [N] [subcommand]    Run all Go tests + lint (timeout in seconds, default $TEST_TIMEOUT)
+    test run <pattern> [pkg] Run the Go tests matching a -run pattern (package default ./...)
     test local               Check local server self-test health
     test live                Check production server self-test health
     test e2e [local|live]    End-to-end test: sign-up, invites, pushes, replies,
