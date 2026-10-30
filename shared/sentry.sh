@@ -92,6 +92,28 @@ _sentry_issue() {
                 "  crumb \(.timestamp[11:19]) [\(.category // "")] \((.message // (.data | tostring))[0:200])")'
 }
 
+# _sentry_resolve marks issues resolved, by short id.
+_sentry_resolve() {
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: ./build.sh sentry resolve <short-id>..."
+        return 1
+    fi
+    local token short_id issue_id
+    token=$(_sentry_auth_token)
+    for short_id in "$@"; do
+        issue_id=$(curl -s -H "Authorization: Bearer $token" \
+            "https://sentry.io/api/0/organizations/${SENTRY_ORG}/shortids/${short_id}/" | jq -r '.groupId // empty')
+        if [[ -z "$issue_id" ]]; then
+            echo "✗ $short_id not found"
+            continue
+        fi
+        curl -s -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
+            -d '{"status":"resolved"}' \
+            "https://sentry.io/api/0/organizations/${SENTRY_ORG}/issues/${issue_id}/" \
+            | jq -r --arg id "$short_id" '"✓ \($id) \(.status // "not changed")"'
+    done
+}
+
 _sentry_usage() {
     cat <<EOF
 Usage: ./build.sh sentry <command>
@@ -101,6 +123,7 @@ Commands:
   issues [status] [N]  List up to N issues with counts (unresolved|resolved|muted, default unresolved, 100)
   event <id>        Show full event JSON with breadcrumbs
   issue <short-id>  An issue's tags and its latest event in short (frames, breadcrumbs)
+  resolve <short-id>...  Mark issues resolved
 EOF
 }
 
@@ -112,6 +135,7 @@ _sentry_dispatch() {
         issues) _sentry_issues "$project" "${2:-unresolved}" "${3:-100}" ;;
         event)  _sentry_event_detail "$project" "$2" ;;
         issue)  _sentry_issue "$2" ;;
+        resolve) shift; _sentry_resolve "$@" ;;
         *)      _sentry_usage ;;
     esac
 }
