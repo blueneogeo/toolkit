@@ -697,11 +697,14 @@ do_install() {
     do_format
     _check_build_tools
     _QUIET_INSTALL=false
-    local _install_target="auto"
+    local _install_target="auto" _no_launch=false
     local arg
     for arg in "$@"; do
         case "$arg" in
             --quiet|-q) _QUIET_INSTALL=true ;;
+            # The next launch is the first after the install, as after an
+            # update from TestFlight: for profiling it.
+            --no-launch) _no_launch=true ;;
             *) _install_target="$arg" ;;
         esac
     done
@@ -709,6 +712,10 @@ do_install() {
     _validate_target
     _guard_not_running
     _do_build build
+    if [[ "$_no_launch" == true ]]; then
+        _install_app && echo "✓ Installed, not launched"
+        return
+    fi
     _launch_app
 }
 
