@@ -4,6 +4,7 @@
 #   ./build.sh ios profile [target] [--script <names>] [--seconds N]
 #                          [--render] [--template <name>] [--name <label>]
 #                          [--callers <function>] [--trace <file>]
+#                          [--main] [--until <seconds>]
 #
 # Records an Instruments trace of the installed app (xctrace) on the
 # connected phone or the booted simulator, then prints a summary: the frame
@@ -14,11 +15,13 @@
 # in build/traces/ to open in Instruments. --callers lists what was on the
 # stack whenever the named function ran, to find who calls a hot system
 # function; --trace reads a trace already recorded instead of a new one.
+# --main keeps only the main thread and adds its busy time per quarter
+# second; --until keeps only the first seconds of the trace (a launch).
 
 do_profile() {
     _detect_project_config
     _check_core_tools
-    local target="" template="Time Profiler" seconds=40 scripts="" name="profile" render=false callers="" existing=""
+    local target="" template="Time Profiler" seconds=40 scripts="" name="profile" render=false callers="" existing="" main=false until=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --callers) callers="$2"; shift 2 ;;
@@ -28,13 +31,15 @@ do_profile() {
             --script) scripts="$2"; shift 2 ;;
             --name) name="$2"; shift 2 ;;
             --render) render=true; shift ;;
+            --main) main=true; shift ;;
+            --until) until="$2"; shift 2 ;;
             *) target="$1"; shift ;;
         esac
     done
 
     if [[ -n "$existing" ]]; then
         [[ -d "$existing" ]] || { echo "✗ No trace at $existing"; return 1; }
-        _profile_summary "$existing" "$callers"
+        _profile_summary "$existing" "$callers" "$main" "$until"
         return
     fi
 
@@ -65,12 +70,12 @@ do_profile() {
         fi
     fi
     echo "✓ Trace saved: $trace"
-    _profile_summary "$trace" "$callers"
+    _profile_summary "$trace" "$callers" "$main" "$until"
 }
 
 # Prints the frame lines, the heaviest functions and the app's hot code.
 _profile_summary() {
-    local trace="$1" callers="${2:-}"
+    local trace="$1" callers="${2:-}" main="${3:-false}" until="${4:-}"
     local tmp
     tmp=$(mktemp -d)
     xcrun xctrace export --input "$trace" --toc > "$tmp/toc.xml" 2>/dev/null || true
@@ -82,11 +87,12 @@ _profile_summary() {
         xcrun xctrace export --input "$trace" \
             --xpath "/trace-toc/run[@number=\"1\"]/data/table[@schema=\"$table\"]" > "$tmp/$table.xml" 2>/dev/null || true
     done
-    python3 - "$tmp" "$PROJECT_NAME" "$callers" <<'PY'
+    python3 - "$tmp" "$PROJECT_NAME" "$callers" "$main" "$until" <<'PY'
 import sys, xml.etree.ElementTree as ET
 from collections import Counter
 
 tmp, app, wanted = sys.argv[1], sys.argv[2], sys.argv[3]
+only_main, until = sys.argv[4] == "true", float(sys.argv[5] or 0)
 
 def load(name):
     try:
@@ -174,7 +180,16 @@ if profile is None:
 real = resolver(profile)
 self_time, app_inclusive, threads, total = Counter(), Counter(), Counter(), 0
 on_stack, wanted_total = Counter(), 0
+timeline, first_sample = Counter(), None
 for row in profile.iter("row"):
+    stamp = real(row.find("sample-time"))
+    at = value(stamp) / 1e9 if stamp is not None else 0
+    if until and at > until:
+        continue
+    thread = real(row.find("thread"))
+    label = thread.attrib.get("fmt", "?").split(" (")[0] if thread is not None else "?"
+    if only_main and not label.startswith("Main Thread"):
+        continue
     weight = real(row.find("weight"))
     backtrace = real(row.find("tagged-backtrace"))
     if backtrace is None:
@@ -191,9 +206,10 @@ for row in profile.iter("row"):
         continue
     total += w
     self_time[names[0][0]] += w
-    thread = real(row.find("thread"))
-    label = thread.attrib.get("fmt", "?").split(" (")[0] if thread is not None else "?"
     threads[label] += w
+    if label.startswith("Main Thread"):
+        timeline[int(at * 4)] += w
+        first_sample = at if first_sample is None else min(first_sample, at)
     seen = set()
     for fname, binary in names:
         if binary is not None and binary.attrib.get("name", "").startswith(app) and fname not in seen:
@@ -209,7 +225,14 @@ def show(title, counter, n):
     for fname, w in counter.most_common(n):
         print(f"  {100 * w / max(total, 1):5.1f}%  {fname[:150]}")
 
-print(f"\nSampled {total / 1e6:.0f} ms of CPU in the app")
+scope = "on the main thread" if only_main else "in the app"
+window = f" in the first {until:g} s" if until else ""
+print(f"\nSampled {total / 1e6:.0f} ms of CPU {scope}{window}")
+if only_main and timeline:
+    print(f"\nMain thread busy per quarter second (first sample at {first_sample:.2f} s):")
+    for quarter in range(min(timeline), max(timeline) + 1):
+        ms = timeline[quarter] / 1e6
+        print(f"  {quarter / 4:6.2f} s  {ms:5.0f} ms  {'#' * round(ms / 10)}")
 show("Time per thread:", threads, 8)
 show("Heaviest functions (own time):", self_time, 25)
 show(f"{app}'s own code (including what it calls):", app_inclusive, 25)
