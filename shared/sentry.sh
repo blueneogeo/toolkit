@@ -52,13 +52,15 @@ _sentry_event_detail() {
 }
 
 # _sentry_issue shows an issue's latest event in short: its tags, the app's own
-# stack frames, the message and the last breadcrumbs.
+# stack frames, the message and the last breadcrumbs. With "all" it shows the
+# system's frames too, up to 40, as for a hang inside iOS's own code.
 _sentry_issue() {
-    local short_id="$1"
+    local short_id="$1" all=false
     if [[ -z "$short_id" ]]; then
-        echo "Usage: ./build.sh sentry issue <short-id>"
+        echo "Usage: ./build.sh sentry issue <short-id> [all]"
         return 1
     fi
+    [[ "${2:-}" == "all" ]] && all=true
     local token issue_id
     token=$(_sentry_auth_token)
     issue_id=$(curl -s -H "Authorization: Bearer $token" \
@@ -78,15 +80,15 @@ _sentry_issue() {
         | sort | uniq -c | sort -k2 -r | head -12 | sed 's/^/  /'
     curl -s -H "Authorization: Bearer $token" \
         "https://sentry.io/api/0/organizations/${SENTRY_ORG}/issues/${issue_id}/events/latest/" \
-        | jq -r '
+        | jq -r --argjson all "$all" '
             "date: \(.dateCreated)",
             "message: \((.message // .title)[0:600])",
             (.entries[] | select(.type == "exception") | .data.values[]? |
                 "exception: \(.type): \((.value // "")[0:400])",
-                (.stacktrace.frames // [] | map(select(.inApp)) | reverse | .[:12][] |
+                (.stacktrace.frames // [] | (if $all then reverse | .[:40] else map(select(.inApp)) | reverse | .[:12] end)[] |
                     "  at \(.function // "?") \(.filename // .module // ""):\(.lineNo // "")")),
             (.entries[] | select(.type == "threads") | .data.values[]? | select(.crashed == true) |
-                (.stacktrace.frames // [] | map(select(.inApp)) | reverse | .[:12][] |
+                (.stacktrace.frames // [] | (if $all then reverse | .[:40] else map(select(.inApp)) | reverse | .[:12] end)[] |
                     "  crashed at \(.function // "?") \(.filename // ""):\(.lineNo // "")")),
             (.entries[] | select(.type == "breadcrumbs") | .data.values[-15:][] |
                 "  crumb \(.timestamp[11:19]) [\(.category // "")] \((.message // (.data | tostring))[0:200])")'
@@ -122,7 +124,7 @@ Commands:
   events [N]        List last N events (default 10)
   issues [status] [N]  List up to N issues with counts (unresolved|resolved|muted, default unresolved, 100)
   event <id>        Show full event JSON with breadcrumbs
-  issue <short-id>  An issue's tags and its latest event in short (frames, breadcrumbs)
+  issue <short-id> [all]  An issue's tags and its latest event in short (frames, breadcrumbs)
   resolve <short-id>...  Mark issues resolved
 EOF
 }
@@ -134,7 +136,7 @@ _sentry_dispatch() {
         events) _sentry_events "$project" "${2:-10}" ;;
         issues) _sentry_issues "$project" "${2:-unresolved}" "${3:-100}" ;;
         event)  _sentry_event_detail "$project" "$2" ;;
-        issue)  _sentry_issue "$2" ;;
+        issue)  _sentry_issue "$2" "${3:-}" ;;
         resolve) shift; _sentry_resolve "$@" ;;
         *)      _sentry_usage ;;
     esac
