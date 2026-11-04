@@ -3366,6 +3366,7 @@ _dispatch() {
         e2e-run)  do_e2e true ;;
         sentry)   shift; _dispatch_sentry "$@" ;;
         upload)   shift; do_upload "$@" ;;
+        testflight) shift; do_testflight "$@" ;;
         update-toolkit) do_update_toolkit ;;
         configure) do_configure ;;
         doctor)   do_doctor ;;

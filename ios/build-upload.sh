@@ -5,6 +5,8 @@
 # Depends on: _check_build_tools, _ensure_project, _do_build, do_doctor, _ruby_bundle_cmd (build.sh)
 # Depends on: IOS_KEY_ID, IOS_ISSUER_ID, IOS_TEAM_ID (build.properties)
 # Config: DEPLOY_TAG_PREFIX (default ios/v), FASTLANE_LANE (default ios upload),
+#         FASTLANE_DISTRIBUTE_LANE (default ios distribute),
+#         TESTFLIGHT_GROUPS (external groups an upload goes to; empty: internal testers only),
 #         IOS_KEY_PATH (default $PROJECT_ROOT/AuthKey.p8)
 
 _require_upload() {
@@ -232,11 +234,13 @@ do_upload() {
     build_number="${existing_tag#${tag_prefix}}"
     build_number="${build_number:-1}"
 
-    local _upload_filter='(\*\* ARCHIVE SUCCEEDED|Successfully exported and signed the ipa file:|Successfully uploaded the new binary|Successfully finished processing|✗|\*\* BUILD FAILED|fatal error|^error)'
+    local _upload_filter='(\*\* ARCHIVE SUCCEEDED|Successfully exported and signed the ipa file:|Successfully uploaded the new binary|Successfully finished processing|upload succeeded|Waiting for Apple|handed to|✗|\*\* BUILD FAILED|fatal error|^error)'
     if IOS_KEY_ID="$IOS_KEY_ID" \
         IOS_ISSUER_ID="$IOS_ISSUER_ID" \
         IOS_TEAM_ID="$IOS_TEAM_ID" \
         BUILD_NUMBER="$build_number" \
+        IOS_BUNDLE_ID="$IOS_BUNDLE_ID" \
+        TESTFLIGHT_GROUPS="${TESTFLIGHT_GROUPS:-}" \
         IOS_KEY_PATH="$key_path" \
         CHANGELOG="$deploy_text" \
         MATCH_PASSWORD="$MATCH_PASSWORD" \
@@ -275,4 +279,31 @@ do_upload() {
     local total_duration=$((SECONDS - total_start))
     echo "=== Done: $existing_tag, build $build_number (${total_duration}s) ==="
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) deploy $existing_tag done build=$build_number commit=$commit by=$deployer duration=${total_duration}s text=\"${deploy_text//$'\n'/ }\"" >> "$deploy_log"
+}
+
+# do_testflight gives an uploaded build to the external groups in
+# TESTFLIGHT_GROUPS, with notes from the argument or else from its tag.
+do_testflight() {
+    _require_upload || return 1
+    local build_number="${1:-}" notes="${2:-}"
+    if [[ ! "$build_number" =~ ^[0-9]+$ ]]; then
+        echo "Usage: ./build.sh ios testflight <build> [notes]"
+        return 1
+    fi
+    if [[ -z "${TESTFLIGHT_GROUPS:-}" ]]; then
+        echo "✗ TESTFLIGHT_GROUPS is empty in build.properties"
+        return 1
+    fi
+    local tag="${DEPLOY_TAG_PREFIX:-ios/v}$build_number"
+    if [[ -z "$notes" ]]; then
+        notes=$(git -C "$PROJECT_ROOT" tag -l "$tag" --format='%(contents:subject)' | sed -n 's/.*| text: //p')
+    fi
+    local key_path="${IOS_KEY_PATH:-$PROJECT_ROOT/AuthKey.p8}"
+    echo "→ build $build_number to $TESTFLIGHT_GROUPS"
+    (cd "$PROJECT_ROOT" && IOS_KEY_ID="$IOS_KEY_ID" IOS_ISSUER_ID="$IOS_ISSUER_ID" IOS_KEY_PATH="$key_path" \
+        IOS_BUNDLE_ID="$IOS_BUNDLE_ID" BUILD_NUMBER="$build_number" TESTFLIGHT_GROUPS="$TESTFLIGHT_GROUPS" CHANGELOG="$notes" \
+        $(_ruby_bundle_cmd) exec fastlane ${FASTLANE_DISTRIBUTE_LANE:-ios distribute} 2>&1 \
+        | grep --line-buffered -E '(Waiting for Apple|handed to|Successfully|error|Error|✗)' \
+        | sed -E -l -e 's/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]: //' -e 's/'$'\x1b''\[[0-9;]*m//g' -e 's/^/  /')
+    return "${PIPESTATUS[0]}"
 }
