@@ -33,20 +33,20 @@ _fly_db_backup() {
 
 # Runs SQL on the live database through a temporary proxy, as one
 # transaction that stops at the first error. It is read-only unless --write
-# is given; a write asks before running and takes a backup first.
+# is given; a write needs the owner's Touch ID (nothing skips it) and takes a
+# backup first.
 _fly_sql() {
     local read_only=1 sql=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --write) read_only=0; shift ;;
-            --force) shift ;;
             *) sql="$1"; shift ;;
         esac
     done
     if [[ -z "$sql" ]]; then
-        echo "Usage: ./build.sh server live sql [--write [--force]] '<sql>'"
+        echo "Usage: ./build.sh server live sql [--write] '<sql>'"
         echo "  Runs SQL on the live database as one transaction, read-only by default."
-        echo "  --write allows changes: it asks first (--force skips that) and takes a database backup."
+        echo "  --write allows changes: it asks for Touch ID first and takes a database backup."
         return 1
     fi
     if ! command -v psql &>/dev/null; then
@@ -65,11 +65,15 @@ _fly_sql() {
     dbname=$(echo "$creds" | jq -r '.credentials.dbname')
 
     if [[ $read_only -eq 0 ]]; then
-        _confirm_live "Live SQL on $FLY_DB_CLUSTER
-
-    $sql
-
-    A database backup is taken first." || return 1
+        echo ""
+        echo "  Live SQL on $FLY_DB_CLUSTER, after a database backup:"
+        echo "$sql" | sed 's/^/    /'
+        echo ""
+        echo "  → Touch ID to allow this change..."
+        if ! swift "$TOOLKIT_DIR/../shared/touchid.swift" "change the live Turn database" 2>/dev/null; then
+            echo "  ✗ Not allowed: Touch ID was not given. Nothing changed."
+            return 1
+        fi
         echo "→ Taking a database backup..."
         local backup
         backup=$(_fly_db_backup) || return 1
