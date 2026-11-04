@@ -617,7 +617,7 @@ _fly_deploy() {
         local _deploy_out="$PROJECT_ROOT/.watch/deploy-build.log"
         local _deploy_filter='(^==>|^✓ Configuration|^--> Building image done|^image size:|^Visit your|^✗|[Ee]rror|[Ff]ail)'
         mkdir -p "$(dirname "$_deploy_out")"
-        if fly deploy --app "$FLY_APP" --strategy "$DEPLOY_STRATEGY" 2>&1 | tee "$_deploy_out" | grep --line-buffered -E "$_deploy_filter" | sed -e 's/^==>/  →/' -e 's/^image size:/  image size:/' -e 's/^Visit your/  Visit your/'; then
+        if fly deploy --app "$FLY_APP" --strategy "$DEPLOY_STRATEGY" --build-arg "SERVER_VERSION=$commit" 2>&1 | tee "$_deploy_out" | grep --line-buffered -E "$_deploy_filter" | sed -e 's/^==>/  →/' -e 's/^image size:/  image size:/' -e 's/^Visit your/  Visit your/'; then
             _deploy_rc=0
         else
             _deploy_rc=${PIPESTATUS[0]}
