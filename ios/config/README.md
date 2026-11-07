@@ -195,6 +195,10 @@ with no target they prefer a connected phone and fall back to the simulator.
   simulator, `debug` reads the simulator's own log stream at debug level and writes the
   script marker only once that stream is listening, so a script that ends at once is
   still heard and the session stops on `DEBUG_SESSION_ENDED`.
+- A script reports each failed check as a `CHECK_FAILED` line and the run ends with
+  `DEBUG_SESSION_ENDED failed=<n>`. `debug` then prints each script's `SCRIPT_RESULT`
+  line and the failed checks, and exits non-zero when any failed or the app stopped
+  before the scripts ended.
 - `signin` / `signout` run the project's `sign_in` / `sign_out` debug scripts on a
   simulator without rebuilding (`debug simulator --no-build --script sign_in`). They take
   `simulator` or a simulator's name or UDID.
