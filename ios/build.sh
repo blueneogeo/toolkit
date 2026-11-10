@@ -696,7 +696,7 @@ do_install() {
     _detect_project_config
     do_format
     _check_build_tools
-    _QUIET_INSTALL=false
+    _QUIET_INSTALL=${IOS_QUIET:-false}
     local _install_target="auto" _no_launch=false
     local arg
     for arg in "$@"; do
@@ -2966,25 +2966,32 @@ _ios_debug() {
         echo "✗ Logs disabled. Set TOOLKIT_LOGS_ENABLED=true in build.properties."
         return 1
     fi
-    local target="auto"
-    if [[ -n "${1:-}" && "$1" != --* ]]; then
-        target="$1"
-        shift
-    fi
-    _select_target "$target"
+    # The target and the flags come in any order; a second target or an
+    # unknown flag stops the run, so it never falls back to a connected phone.
+    local target=""
     local cat_filter=""
     local level_filter=""
     local script_names=""
     local no_build=false
-    while [[ "${1:-}" == --* ]]; do
+    while [[ $# -gt 0 ]]; do
         case "$1" in
             --cat) cat_filter="${2:-}"; shift 2 ;;
             --level) level_filter="${2:-}"; shift 2 ;;
             --script) script_names="${2:-}"; shift 2 ;;
             --no-build) no_build=true; shift ;;
-            *) echo "⚠ Unknown flag: $1" >&2; shift ;;
+            --quiet) export IOS_QUIET=true; shift ;;
+            --*) echo "✗ Unknown flag: $1" >&2; return 1 ;;
+            *)
+                if [[ -n "$target" ]]; then
+                    echo "✗ Two targets: $target and $1" >&2
+                    return 1
+                fi
+                target="$1"
+                shift
+                ;;
         esac
     done
+    _select_target "${target:-auto}"
     if [[ -n "$script_names" && "${TOOLKIT_DEBUG_SCRIPTS:-false}" != "true" ]]; then
         echo "⚠ --script ignored: set TOOLKIT_DEBUG_SCRIPTS=true in build.properties to enable debug scripts."
         script_names=""

@@ -134,7 +134,7 @@ _launch_app() {
             local extra=()
             read -r -a extra <<< "${IOS_LAUNCH_ARGS:-}"
             xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" "$@" ${extra[@]+"${extra[@]}"} > /dev/null
-            if [[ "${_QUIET_INSTALL:-false}" != "true" ]]; then
+            if [[ "${_QUIET_INSTALL:-${IOS_QUIET:-false}}" != "true" ]]; then
                 _open_simulator_gui
             fi
             ;;
