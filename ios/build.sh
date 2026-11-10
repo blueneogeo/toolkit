@@ -2898,7 +2898,9 @@ _clear_scriptor_marker() {
         iphonesimulator)
             local data_dir
             data_dir=$(xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" data 2>/dev/null || true)
-            [[ -n "$data_dir" ]] && rm -f "$data_dir/Library/Caches/$marker"
+            if [[ -n "$data_dir" ]]; then
+                rm -f "$data_dir/Library/Caches/$marker"
+            fi
             ;;
     esac
 }
