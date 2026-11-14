@@ -1201,6 +1201,8 @@ Usage: ./build.sh ios simulator <command>
   contact <simulator> <file.vcf>
                        Add the vCard's contacts to that simulator's Contacts and
                        let the app read them, without the system asking.
+  restart <simulator>  Shut that simulator down and start it again, with fresh
+                       system services (its sound among them).
   text-size [size]     Set the simulator's text size (Dynamic Type); no size prints
                        the current one. --device <name|udid> picks the simulator,
                        else the booted one. large is the default. Sizes:
@@ -1219,6 +1221,16 @@ do_simulator() {
             fi
             xcrun simctl launch "$SIM_ID" "$(_bundle_id_for_config)" >/dev/null || return 1
             echo "✓ The app is in front on $SIM_NAME"
+            ;;
+        restart)
+            shift
+            if [[ -z "${1:-}" ]] || ! _use_named_simulator "$1"; then
+                echo "✗ simulator restart needs a simulator's name or UDID"
+                return 1
+            fi
+            xcrun simctl shutdown "$SIM_ID" 2>/dev/null || true
+            xcrun simctl bootstatus "$SIM_ID" -b >/dev/null || return 1
+            echo "✓ $SIM_NAME started again"
             ;;
         contact)
             shift
