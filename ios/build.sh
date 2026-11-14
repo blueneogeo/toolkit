@@ -1182,6 +1182,9 @@ Usage: ./build.sh ios simulator <command>
   create <model>       Make a simulator of that model (e.g. "iPhone 13 mini") on the
                        newest iOS runtime, unless one exists; prints its UDID. Use its
                        name as the target of install, debug, screenshot and the like.
+  front <simulator>    Bring the app back to the front on that simulator, as a tap on
+                       its icon does: the running process carries on, nothing is
+                       installed or restarted.
   text-size [size]     Set the simulator's text size (Dynamic Type); no size prints
                        the current one. --device <name|udid> picks the simulator,
                        else the booted one. large is the default. Sizes:
@@ -1191,6 +1194,16 @@ EOF
 
 do_simulator() {
     case "${1:-}" in
+        front)
+            shift
+            _detect_project_config
+            if [[ -z "${1:-}" ]] || ! _use_named_simulator "$1"; then
+                echo "✗ simulator front needs a simulator's name or UDID"
+                return 1
+            fi
+            xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" >/dev/null || return 1
+            echo "✓ The app is in front on $SIM_NAME"
+            ;;
         create)
             shift
             local model="${1:-}"
