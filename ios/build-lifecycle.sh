@@ -133,7 +133,11 @@ _launch_app() {
             # (e.g. one that starts the app muted) to every simulator launch.
             local extra=()
             read -r -a extra <<< "${IOS_LAUNCH_ARGS:-}"
-            xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" "$@" ${extra[@]+"${extra[@]}"} > /dev/null
+            # A script run starts a new process: one still running would
+            # keep the environment of the run before.
+            local fresh=()
+            [[ "${_LAUNCH_FRESH:-false}" == "true" ]] && fresh=(--terminate-running-process)
+            xcrun simctl launch ${fresh[@]+"${fresh[@]}"} "$SIM_ID" "$BUNDLE_ID" "$@" ${extra[@]+"${extra[@]}"} > /dev/null
             if [[ "${_QUIET_INSTALL:-${IOS_QUIET:-false}}" != "true" ]]; then
                 _open_simulator_gui
             fi

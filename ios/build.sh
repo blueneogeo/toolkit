@@ -3119,6 +3119,7 @@ EOF
             ;;
 
         iphonesimulator)
+            [[ -n "$script_names" ]] && _LAUNCH_FRESH=true
             if $no_build; then
                 do_launch simulator
             else
