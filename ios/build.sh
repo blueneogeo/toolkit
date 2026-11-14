@@ -2891,6 +2891,27 @@ _sanitize_script_names() {
     return 1
 }
 
+# The run's script names and SCRIPT_ENV_<NAME> values as JSON, for the file
+# a simulator run puts beside the app (DebugScriptLaunchFile).
+_write_script_config() {
+    local file="$1" names="$2" var
+    local -a pairs=()
+    for var in $(compgen -v SCRIPT_ENV_); do
+        pairs+=("${var#SCRIPT_ENV_}=${!var}")
+    done
+    if [[ -n "${_SIGNIN_EMAIL:-}" ]]; then
+        pairs+=("${DEBUG_ENV_PREFIX}_LOGIN_EMAIL=$_SIGNIN_EMAIL" "${DEBUG_ENV_PREFIX}_LOGIN_CODE=$_SIGNIN_CODE")
+    fi
+    python3 - "$file" "$names" ${pairs[@]+"${pairs[@]}"} <<'EOF'
+import json
+import sys
+
+path, names, pairs = sys.argv[1], sys.argv[2], sys.argv[3:]
+with open(path, "w") as out:
+    json.dump({"names": names, "environment": dict(pair.split("=", 1) for pair in pairs)}, out)
+EOF
+}
+
 _clear_scriptor_marker() {
     local marker="${DEBUG_MARKER_NAME:-scriptor-ready}"
     case "$_TARGET_SDK" in
@@ -3019,6 +3040,13 @@ _ios_debug() {
         if [[ -n "${_SIGNIN_EMAIL:-}" ]]; then
             export "SIMCTL_CHILD_${DEBUG_ENV_PREFIX}_LOGIN_EMAIL=$_SIGNIN_EMAIL" "SIMCTL_CHILD_${DEBUG_ENV_PREFIX}_LOGIN_CODE=$_SIGNIN_CODE"
         fi
+        # The simulator keeps an app's environment from its first launch
+        # after an install, so the run's names and values also go into a
+        # file beside the app, which _launch_app puts there before launching.
+        if [[ "$_TARGET_SDK" == "iphonesimulator" ]]; then
+            _SCRIPT_CONFIG_FILE=$(mktemp)
+            _write_script_config "$_SCRIPT_CONFIG_FILE" "$script_names" || return 1
+        fi
     fi
     case "$_TARGET_SDK" in
         iphoneos)
@@ -3046,13 +3074,37 @@ enum DebugScriptConfig {
     static let compileTimeNames = "$script_names"
     static let compileTimeEnvironment: [String: String] = $environment
 
+    /// A simulator run's names and values, put beside the app before each
+    /// launch: a relaunched app can keep the environment of its first launch.
+    private static let launchFile = DebugScriptLaunchFile.take()
+
     static var names: String {
-        ProcessInfo.processInfo.environment["${DEBUG_ENV_PREFIX}_DEBUG_SCRIPT_NAMES"] ?? compileTimeNames
+        launchFile?.names ?? ProcessInfo.processInfo.environment["${DEBUG_ENV_PREFIX}_DEBUG_SCRIPT_NAMES"] ?? compileTimeNames
     }
 
     /// The launch environment, with what a phone run compiled in.
     static var environment: [String: String] {
-        compileTimeEnvironment.merging(ProcessInfo.processInfo.environment) { \$1 }
+        compileTimeEnvironment
+            .merging(ProcessInfo.processInfo.environment) { \$1 }
+            .merging(launchFile?.environment ?? [:]) { \$1 }
+    }
+}
+
+/// Read once and removed, so a later launch without a run runs no scripts.
+struct DebugScriptLaunchFile: Decodable {
+    let names: String
+    let environment: [String: String]
+
+    static func take() -> Self? {
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("scriptor-config.json")
+        guard let data = FileManager.default.contents(atPath: url.path) else { return nil }
+        defer { try? FileManager.default.removeItem(at: url) } // non-actionable: a file left behind is read and removed at the next run
+        do {
+            return try JSONDecoder().decode(Self.self, from: data)
+        } catch {
+            // non-actionable: a file the run didn't finish writing runs no scripts
+            return nil
+        }
     }
 }
 #endif

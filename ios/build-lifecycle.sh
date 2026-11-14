@@ -129,6 +129,14 @@ _launch_app() {
             fi
             _prune_model_cache
             _install_app
+            if [[ -n "${_SCRIPT_CONFIG_FILE:-}" ]]; then
+                local data_dir
+                data_dir=$(xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" data 2>/dev/null || true)
+                if [[ -n "$data_dir" ]]; then
+                    mkdir -p "$data_dir/Library/Caches"
+                    cp "$_SCRIPT_CONFIG_FILE" "$data_dir/Library/Caches/scriptor-config.json"
+                fi
+            fi
             # IOS_LAUNCH_ARGS adds launch arguments of the project's own
             # (e.g. one that starts the app muted) to every simulator launch.
             local extra=()
