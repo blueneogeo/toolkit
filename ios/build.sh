@@ -1217,7 +1217,7 @@ do_simulator() {
                 echo "✗ simulator front needs a simulator's name or UDID"
                 return 1
             fi
-            xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" >/dev/null || return 1
+            xcrun simctl launch "$SIM_ID" "$(_bundle_id_for_config)" >/dev/null || return 1
             echo "✓ The app is in front on $SIM_NAME"
             ;;
         contact)
@@ -1232,7 +1232,7 @@ do_simulator() {
                 return 1
             fi
             xcrun simctl addmedia "$SIM_ID" "$2" || return 1
-            xcrun simctl privacy "$SIM_ID" grant contacts "$BUNDLE_ID" || return 1
+            xcrun simctl privacy "$SIM_ID" grant contacts "$(_bundle_id_for_config)" || return 1
             echo "✓ The contacts are on $SIM_NAME, and the app may read them"
             ;;
         create)
