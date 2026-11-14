@@ -1198,6 +1198,9 @@ Usage: ./build.sh ios simulator <command>
   front <simulator>    Bring the app back to the front on that simulator, as a tap on
                        its icon does: the running process carries on, nothing is
                        installed or restarted.
+  contact <simulator> <file.vcf>
+                       Add the vCard's contacts to that simulator's Contacts and
+                       let the app read them, without the system asking.
   text-size [size]     Set the simulator's text size (Dynamic Type); no size prints
                        the current one. --device <name|udid> picks the simulator,
                        else the booted one. large is the default. Sizes:
@@ -1216,6 +1219,21 @@ do_simulator() {
             fi
             xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" >/dev/null || return 1
             echo "✓ The app is in front on $SIM_NAME"
+            ;;
+        contact)
+            shift
+            _detect_project_config
+            if [[ -z "${1:-}" ]] || ! _use_named_simulator "$1"; then
+                echo "✗ simulator contact needs a simulator's name or UDID"
+                return 1
+            fi
+            if [[ "${2:-}" != *.vcf || ! -f "${2:-}" ]]; then
+                echo "✗ simulator contact needs a .vcf file"
+                return 1
+            fi
+            xcrun simctl addmedia "$SIM_ID" "$2" || return 1
+            xcrun simctl privacy "$SIM_ID" grant contacts "$BUNDLE_ID" || return 1
+            echo "✓ The contacts are on $SIM_NAME, and the app may read them"
             ;;
         create)
             shift
@@ -3353,9 +3371,10 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     push <payload.json>
                        Deliver an APNs payload to the app on the booted simulator; it is
                        shown directly, without running a notification service extension
-    simulator <create <model>|text-size [size]>
-                       Make a simulator of another model (e.g. "iPhone 13 mini"), or set
-                       the booted simulator's text size (Dynamic Type).
+    simulator <create <model>|front <sim>|contact <sim> <vcf>|text-size [size]>
+                       Make a simulator of another model (e.g. "iPhone 13 mini"), bring
+                       the app to the front, add contacts the app may read, or set the
+                       booted simulator's text size (Dynamic Type).
     profile [target] [--script <names>] [--seconds N] [--render] [--template <name>] [--name <label>]
                        Record an Instruments trace (Time Profiler by default) of the app on
                        the connected phone or booted simulator and print the frame rate and
