@@ -513,9 +513,22 @@ _do_build() {
 
 # ── Unified app path ────────────────────────────────────────────────
 
+# This checkout's DerivedData folder: each checkout of the project (a git
+# worktree, say) builds into one of its own, and the newest may be another's.
+_own_derived_data() {
+    local dir workspace
+    for dir in $(ls -dt ~/Library/Developer/Xcode/DerivedData/${PROJECT_NAME}-*/ 2>/dev/null); do
+        workspace=$(/usr/libexec/PlistBuddy -c "Print :WorkspacePath" "${dir}info.plist" 2>/dev/null || true)
+        if [[ "$workspace" == "$PROJECT_ROOT/$PROJECT_NAME.xcodeproj" ]]; then
+            echo "$dir"
+            return
+        fi
+    done
+}
+
 _find_app() {
     local derived
-    derived=$(ls -dt ~/Library/Developer/Xcode/DerivedData/${PROJECT_NAME}-*/ 2>/dev/null | head -1)
+    derived=$(_own_derived_data)
     if [[ -n "$derived" ]]; then
         find "$derived"Build/Products/"$(_build_config)"-"$_TARGET_SDK" \
             -name "${APP_EXECUTABLE}.app" -maxdepth 1 2>/dev/null | head -1
