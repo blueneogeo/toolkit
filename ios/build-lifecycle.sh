@@ -65,7 +65,18 @@ _install_app() {
 
     case "$_TARGET_SDK" in
         iphonesimulator)
-            xcrun simctl install "$SIM_ID" "$app_path" 2>/dev/null || true
+            # A launch of the build already installed there keeps that copy:
+            # installing it again only costs time.
+            local stamp fingerprint
+            stamp="$(dirname "$app_path")/.installed-$SIM_ID"
+            fingerprint=$(find "$app_path" -type f -print0 | xargs -0 stat -f '%m %z %N' | shasum)
+            if [[ -f "$stamp" && "$(cat "$stamp")" == "$fingerprint" ]] \
+                && xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" >/dev/null 2>&1; then
+                return 0
+            fi
+            if xcrun simctl install "$SIM_ID" "$app_path" 2>/dev/null; then
+                echo "$fingerprint" > "$stamp"
+            fi
             ;;
         iphoneos)
             [[ -z "${DEVICE_UDID:-}" ]] && { echo "✗ Device UDID unknown."; return 1; }

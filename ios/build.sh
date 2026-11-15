@@ -3033,10 +3033,10 @@ _script_summary() {
     echo "✓ Every check passed."
 }
 
-# True while the app's process runs on the simulator.
-_sim_app_alive() {
+# The process id of the app running on the simulator, or nothing.
+_sim_app_pid() {
     xcrun simctl spawn "$SIM_ID" launchctl list 2>/dev/null \
-        | awk -v app="UIKitApplication:$BUNDLE_ID" '$3 ~ "^"app && $1 ~ /^[0-9]+$/ { found=1 } END { exit !found }'
+        | awk -v app="UIKitApplication:$BUNDLE_ID" '$3 ~ "^"app && $1 ~ /^[0-9]+$/ { print $1; exit }'
 }
 
 _ios_debug() {
@@ -3256,8 +3256,16 @@ EOF
                 # Neither helper keeps this command's output open: a caller
                 # reading it waits for the last writer to go.
                 ( sleep 1; _write_scriptor_marker ) >/dev/null 2>&1 &
-                # A crashed app writes nothing more: stop reading once it's gone.
-                ( sleep 15; while _sim_app_alive; do sleep 3; done; kill "$pipe_pid" 2>/dev/null ) >/dev/null 2>&1 &
+                # A crashed app writes nothing more: stop reading once the
+                # process launched here is gone, also when iOS has started
+                # the app again in the background meanwhile.
+                (
+                    launched=$(_sim_app_pid)
+                    sleep 15
+                    launched=${launched:-$(_sim_app_pid)}
+                    while [[ -n "$launched" && "$(_sim_app_pid)" == "$launched" ]]; do sleep 3; done
+                    kill "$pipe_pid" 2>/dev/null
+                ) >/dev/null 2>&1 &
                 watch_pid=$!
                 disown "$watch_pid"
             fi
