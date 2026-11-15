@@ -3253,9 +3253,11 @@ EOF
             # can't end the session before it is heard.
             local watch_pid=""
             if [[ -n "$script_names" ]]; then
-                ( sleep 1; _write_scriptor_marker ) &
+                # Neither helper keeps this command's output open: a caller
+                # reading it waits for the last writer to go.
+                ( sleep 1; _write_scriptor_marker ) >/dev/null 2>&1 &
                 # A crashed app writes nothing more: stop reading once it's gone.
-                ( sleep 15; while _sim_app_alive; do sleep 3; done; kill "$pipe_pid" 2>/dev/null ) &
+                ( sleep 15; while _sim_app_alive; do sleep 3; done; kill "$pipe_pid" 2>/dev/null ) >/dev/null 2>&1 &
                 watch_pid=$!
                 disown "$watch_pid"
             fi
@@ -3290,8 +3292,8 @@ EOF
                 fi
             done < "$fifo"
             if [[ -n "$watch_pid" ]]; then
-                kill "$watch_pid" 2>/dev/null || true
                 pkill -P "$watch_pid" 2>/dev/null || true
+                kill "$watch_pid" 2>/dev/null || true
             fi
             kill -9 "$pipe_pid" 2>/dev/null || true
             { wait "$pipe_pid"; } 2>/dev/null || true
