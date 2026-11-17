@@ -4,7 +4,7 @@
 #
 # Provides: _find_apk, _app_id, _app_running, _terminate_app, _install_app,
 #           _launch_app, _am_start, _reverse_server_port, _use_target,
-#           _install_without_launch, do_install, do_launch, do_uninstall
+#           _install_without_launch, do_install, do_launch, do_uninstall, do_watch
 # Depends on: SERIAL, _select_android_target, _target_label (build-device.sh)
 # Depends on: do_emulator (build-emulator.sh), do_build (build-gradle.sh)
 # Depends on: _lock_take (build-lock.sh)
@@ -274,4 +274,102 @@ do_uninstall() {
     else
         echo "App was not installed on $(_target_label)."
     fi
+}
+
+# Removes the watcher's folder, stops its fswatch and releases the locks when
+# watch ends. Set again after each lock take, which sets its own EXIT trap.
+_watch_trap() {
+    trap '_lock_release_all; rm -rf "$PROJECT_ROOT/.watch"; pkill -P $$ fswatch 2>/dev/null || true' EXIT
+}
+
+# Stops the app, installs the newest APK and launches it, holding the
+# emulator lock only meanwhile so other work can use the emulator between.
+_watch_deploy() {
+    local target="$1" app_id
+    _lock_take emulator || return 1
+    _watch_trap
+    _use_target "$target" || { _lock_release emulator; return 1; }
+    app_id=$(_app_id) || { _lock_release emulator; return 1; }
+    _terminate_app "$app_id"
+    sleep "$REDEPLOY_GAP"
+    _launch_app || true
+    _lock_release emulator
+}
+
+# watch [target] [kotlin|build]: build, launch, then redeploy on every change
+# to a .kt file under the module (kotlin), or whenever .watch/build.stamp is
+# touched (build), as ios watch does with swift|build.
+do_watch() {
+    local target="" mode="kotlin"
+    if [[ $# -gt 0 ]]; then
+        case "$1" in
+            emulator|simulator|device|auto)
+                target="$1"
+                mode="${2:-kotlin}"
+                ;;
+            kotlin|build)
+                mode="$1"
+                ;;
+            *)
+                if _is_target_word "$1"; then
+                    target="$1"
+                    mode="${2:-kotlin}"
+                else
+                    mode="$1"
+                fi
+                ;;
+        esac
+    fi
+    case "$mode" in
+        kotlin|build) ;;
+        *)
+            echo "✗ Unknown watch mode: $mode. Use 'kotlin' or 'build'."
+            return 1
+            ;;
+    esac
+    if ! command -v fswatch >/dev/null 2>&1; then
+        echo "✗ fswatch not found. Install with: brew install fswatch"
+        return 1
+    fi
+
+    do_build || return 1
+    _watch_deploy "$target" || return 1
+
+    mkdir -p "$(dirname "$PID_FILE")"
+    echo "$$" > "$PID_FILE"
+    _watch_trap
+
+    case "$mode" in
+        kotlin)
+            local dir="$PROJECT_ROOT/$ANDROID_MODULE/src"
+            echo "Watching for Kotlin changes in $dir/ ..."
+            echo ""
+            while true; do
+                local changed
+                changed=$(fswatch --latency 0.5 --one-event "$dir/" 2>/dev/null || true)
+                [[ "$changed" == *.kt ]] || continue
+                echo "[$(date '+%H:%M:%S')] Change: $(basename "$changed") → rebuilding"
+                if _assemble; then
+                    _watch_deploy "$target" || true
+                fi
+                echo "[$(date '+%H:%M:%S')] Done."
+                echo ""
+                sleep "$WATCH_COOLDOWN"
+            done
+            ;;
+        build)
+            local stamp="$PROJECT_ROOT/.watch/build.stamp"
+            [[ -f "$stamp" ]] || touch "$stamp"
+            echo "Watching for builds via $stamp ..."
+            echo ""
+            while true; do
+                fswatch --latency 0.5 --one-event "$stamp" >/dev/null 2>&1 || true
+                echo "[$(date '+%H:%M:%S')] Build detected → redeploying"
+                _watch_deploy "$target" || true
+                echo "[$(date '+%H:%M:%S')] Done."
+                echo ""
+                sleep "$WATCH_COOLDOWN"
+            done
+            ;;
+    esac
 }

@@ -204,7 +204,7 @@ _doctor_avd() {
     [[ -n "$ANDROID_EMULATOR_AVD" ]] || { _doctor_report warn avd "no ANDROID_EMULATOR_AVD in build.properties"; return 0; }
     local config="$HOME/.android/avd/$ANDROID_EMULATOR_AVD.avd/config.ini"
     if [[ ! -f "$config" ]]; then
-        _doctor_report fail avd "$ANDROID_EMULATOR_AVD missing" "Create it (doc/preflight.md)"
+        _doctor_report fail avd "$ANDROID_EMULATOR_AVD missing" "./build.sh android setup"
         return 0
     fi
     local problems=()

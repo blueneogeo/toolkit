@@ -12,7 +12,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 |---|---|
 | `build.sh` | Settings, `--device` and `--config`, dispatch, usage |
 | `build-gradle.sh` | The JDK, the Gradle wrapper, `build`, `clean`, `test`, `lint`, `format` |
-| `build-lifecycle.sh` | `install`, `launch`, `uninstall`, `adb reverse`, the fixture session |
+| `build-lifecycle.sh` | `install`, `launch`, `uninstall`, `watch`, `adb reverse`, the fixture session |
 | `build-debug.sh` | `logs`, `debug`, `signin`, `signout` |
 | `build-device.sh` | Target selection, `screenshot`, `screenshots collect`, `see` |
 | `build-record.sh` | `record` |
@@ -23,6 +23,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `build-worktree.sh` | `worktree new\|remove\|list` |
 | `build-doctor.sh` | `doctor` |
 | `build-sync.sh` | `sync`, and the parity gate in `build` and `lint` |
+| `build-setup.sh` | `setup` |
 
 `toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `logfmt.sh` (`--level`), `scripts.sh` (script names and the check summary of `debug`), `vision.sh`, and `parity/` (the extractors and `parity.py` behind `sync`).
 
@@ -48,6 +49,10 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `TOOLKIT_SERVER_ENABLED` | `false` | `adb reverse` on every launch, server check before tests |
 | `TOOLKIT_DEBUG_SCRIPTS` | `false` | `debug --script` and `record --script` |
 | `TOOLKIT_LOGS_ENABLED` | `true` | `logs` and `debug` |
+| `TOOLKIT_SENTRY_ENABLED` | `false` | `sentry` queries, with `SENTRY_ORG` and `ANDROID_SENTRY_PROJECT` |
+| `ANDROID_SENTRY_PROJECT` | none | The Sentry project `sentry` reads |
+| `ANDROID_EMULATOR_PROFILE` | `pixel_8` | The avdmanager device profile `emulator create` and `setup` use while `ANDROID_EMULATOR_AVD` doesn't exist |
+| `ANDROID_EMULATOR_HARDWARE` | the iPhone 17 Pro's canvas | `config.ini` keys written into that first AVD: `hw.lcd.width=1206 hw.lcd.height=2622 hw.lcd.density=480 hw.ramSize=3072 hw.audioInput=no hw.camera.back=virtualscene hw.camera.front=emulated hw.keyboard=yes PlayStore.enabled=no` and a 1206x2622 skin without a frame |
 | `TOOLKIT_ARCH_CHECKS` | `true` | Runs `do_android_arch_checks` in lint when a lint file defines it, and the parity gate |
 | `TURN_ROOT` | none | The leading platform's repository; `sync` reads iOS from its commits, read-only |
 | `TOOLKIT_DEBUG_TIMEOUT` | `600` | Seconds a scripted `debug` waits for `DEBUG_SESSION_ENDED` |
@@ -85,6 +90,7 @@ A lone argument to `screenshot` or `record` is the target only when it is one of
 
 | Command | Does |
 |---|---|
+| `setup [--force]` | First-time setup, safe to re-run: accepts the SDK licences (sdkmanager asks you) when none are, installs the missing SDK packages (platform-tools, emulator, the module's `compileSdk`, `ANDROID_BUILD_TOOLS`, `ANDROID_EMULATOR_IMAGE`), makes `ANDROID_EMULATOR_AVD` when it doesn't exist (`emulator create`), writes `sdk.dir` to `local.properties` when it is missing, runs `gradlew --version`, then assembles the app. A re-run finds everything in place and only builds. `--force` runs `clean` before the build. Needs the SDK's command-line tools (`cmdline-tools/latest`). |
 | `build` | `ktlintFormat`, then `ktlintCheck` and `detekt` (each when the Gradle build applies the plugin) and the arch checks, then `:app:assemble<Type>`. Prints `✓ Format passed`, `✓ Lint passed`, `✓ Build complete`. |
 | `clean` | `gradle clean` and removes `build/` (screenshots, recordings, logs). |
 | `test [filter] [timeout] [--no-build\|--build-only]` | `:app:test<Type>UnitTest --rerun`. The filter is a class name (`FeedLoadTests`) or `Class/method`. Stops Gradle after the timeout (120 s). Prints the verdict from the JUnit reports: `✓ 12 tests passed` or `✗ 2 of 12 tests failed:` and one line per failure. `--no-build` is accepted; Gradle compiles only what changed anyway. Asks the server first when `TOOLKIT_SERVER_ENABLED=true`. `--build-only` compiles the tests (`:app:compile<Type>UnitTestKotlin`) without running them and without asking the server, and prints `✓ Tests build`. |
@@ -101,6 +107,7 @@ Gradle's output goes to `build/logs/gradle-<command>.log`. On failure the toolki
 | `install [target] [--quiet] [--no-launch] [--fixture [slot]]` | `build`, then `adb install -r -d`, `adb reverse tcp:8080 tcp:8080` (with the server on) and `am start -W -S`. `--quiet` is accepted for iOS parity; the emulator window is never brought forward. `--no-launch` installs without opening the app and compiles it with `cmd package compile -m speed-profile -f`, the state a Play install leaves, so the next launch is the first after an install (for launch measurements); it prints `✓ Installed, not launched`. |
 | `launch [target] [--fixture [slot]] -- [extras...]` | Installs the built APK and launches it, forwarding am start extras (`--es key value`, `--ez key true`). Builds first when there is no APK. |
 | `uninstall [target]` | Stops the watcher and the app and uninstalls it. Unlike iOS, which shuts the simulator down, the emulator keeps running: other work shares it. |
+| `watch [target] [kotlin\|build]` | `build` and launch, then redeploy on every change: `kotlin` (default) rebuilds when a `.kt` file under `<module>/src` changes; `build` reinstalls whenever `.watch/build.stamp` is touched. 2 s between rounds. Takes the emulator lock only while it installs. Needs `fswatch`. `uninstall` stops it. |
 | `logs [target] [--cat <cat>] [--level <level>] [--process <name\|all>] [--minutes M] [N\|tail]` | The last N lines (default 10) of the last M minutes (default 15) of the app's log lines (tag `ANDROID_LOG_TAG`) as `HH:MM:SS.mmm  LEVEL [cat] msg`. `--cat all` shows every line of the running app's process. `--process <name>` shows every line of that running process (`pidof`), for example `system_server`, whose `ActivityManager` lines say why an app process died; `--process all` every line on the device. Other tags read `HH:MM:SS.mmm  P/Tag: msg`. `tail` streams new lines of the app and takes neither `--process` nor `--minutes`. |
 | `debug [target] [--cat] [--level] [--script <names>] [--no-build] [--timeout N] [--fixture [slot]]` | Below. |
 | `signin [target] [email code]` / `signout [target]` | `debug <target> --no-build --script sign_in` or `sign_out`; the target defaults to `emulator`. The login comes from `SCRIPT_ENV_TURN_LOGIN_EMAIL` and `_CODE`, or the two arguments. |
@@ -147,6 +154,10 @@ The target and the flags come in any order. A second target or an unknown flag s
 Every `ui` action except `describe` takes a screenshot afterwards and prints its path last. `--no-shot` skips it; `--delay <ms>` changes the wait before it (700 by default).
 
 `ui` reads the screen through `uiautomator dump`, which sees what the accessibility tree sees. Taps and swipes go through `adb shell input`, scaled from dp to pixels with the device's density.
+
+### sentry
+
+`sentry <events [N] | issues [status] [N] | event <id> | issue <short-id> [all] | resolve <short-id>...>` runs the queries of `toolkit/shared/sentry.sh`, the same as iOS, on `ANDROID_SENTRY_PROJECT`. It needs `TOOLKIT_SENTRY_ENABLED=true`, `SENTRY_ORG`, the project, and a token in `SENTRY_AUTH_TOKEN` or `~/.sentryclirc`; `events` also needs `sentry-cli`.
 
 ### Overnight work
 

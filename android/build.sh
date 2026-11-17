@@ -15,6 +15,7 @@ else
 fi
 
 source "$SCRIPT_DIR/../shared/build-utils.sh"
+source "$SCRIPT_DIR/../shared/sentry.sh"
 source "$SCRIPT_DIR/../shared/vision.sh"
 source "$SCRIPT_DIR/../shared/logfmt.sh"
 source "$SCRIPT_DIR/../shared/scripts.sh"
@@ -31,6 +32,7 @@ source "$SCRIPT_DIR/build-overnight.sh"
 source "$SCRIPT_DIR/build-worktree.sh"
 source "$SCRIPT_DIR/build-doctor.sh"
 source "$SCRIPT_DIR/build-sync.sh"
+source "$SCRIPT_DIR/build-setup.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/android.pid"
 TEST_TIMEOUT=120
@@ -39,6 +41,8 @@ TEST_TIMEOUT=120
 
 LAUNCH_POLL_INTERVAL=0.5
 LAUNCH_TIMEOUT_TICKS=16
+REDEPLOY_GAP=0.5
+WATCH_COOLDOWN=2.0
 
 # ── Config ──────────────────────────────────────────────────────────
 
@@ -64,6 +68,10 @@ _load_android_config() {
     ADB="$ANDROID_SDK/platform-tools/adb"
     EMULATOR_BIN="$ANDROID_SDK/emulator/emulator"
     ANDROID_EMULATOR_AVD="${ANDROID_EMULATOR_AVD:-}"
+    # A new AVD's hardware while ANDROID_EMULATOR_AVD doesn't exist yet: the
+    # iPhone 17 Pro's canvas, 402x874 dp, no microphone, the test camera.
+    ANDROID_EMULATOR_PROFILE="${ANDROID_EMULATOR_PROFILE:-pixel_8}"
+    ANDROID_EMULATOR_HARDWARE="${ANDROID_EMULATOR_HARDWARE:-hw.lcd.width=1206 hw.lcd.height=2622 hw.lcd.density=480 hw.ramSize=3072 hw.audioInput=no hw.camera.back=virtualscene hw.camera.front=emulated hw.keyboard=yes PlayStore.enabled=no skin.name=1206x2622 skin.path=_no_skin showDeviceFrame=no}"
 
     ANDROID_MODULE="${ANDROID_MODULE:-app}"
     ANDROID_APPLICATION_ID="${ANDROID_APPLICATION_ID:-}"
@@ -99,6 +107,9 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
     when nothing is connected. --device or ANDROID_DEVICE picks one of several.
 
   Local dev:
+    setup [--force]    First-time setup: SDK packages and licences, the AVD, local.properties,
+                       the Gradle wrapper, then a build. Re-runs do only what is missing;
+                       --force builds from clean
     build              Format, lint (ktlint, detekt) and assemble the configured build type
     clean              Gradle clean, and remove build/ (screenshots, recordings)
     install [target] [--quiet|-q] [--no-launch]
@@ -109,6 +120,7 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        (e.g. --ez turnMuted true); builds first when no APK exists
     uninstall [target] Stop the watcher and the app, and uninstall it. The emulator keeps
                        running; other work shares it ('emulator stop' shuts it down)
+    watch [target] [mode]  Build + launch + auto-redeploy (mode: kotlin|build, default: kotlin)
     test [filter] [timeout] [--no-build|--build-only]
                        Run unit tests; filter by class name (or Class/method), timeout
                        in seconds (default $TEST_TIMEOUT). Gradle builds only what changed,
@@ -159,6 +171,9 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        and contact sheets ('./build.sh android record --help')
     ui <tap|swipe|type|press|describe> [args]
                        Drive the screen and read its view tree ('./build.sh android ui')
+
+  Online (enable via build.properties):
+    sentry <cmd>       Sentry queries (TOOLKIT_SENTRY_ENABLED, ANDROID_SENTRY_PROJECT)
 
   Parity with the leading platform:
     sync <status|diff|mark|map|init|coverage|guide>
@@ -245,11 +260,14 @@ _dispatch() {
     esac
 
     case "${1:-}" in
+        setup)       shift; do_setup "$@" ;;
         build)       do_build ;;
         clean)       do_clean ;;
         install)     shift; do_install "$@" ;;
         launch)      shift; do_launch "$@" ;;
         uninstall)   shift; do_uninstall "$@" ;;
+        watch)       shift; do_watch "$@" ;;
+        sentry)      shift; _dispatch_sentry "$@" ;;
         test)        shift; do_test "$@" ;;
         lint)        do_lint ;;
         format)      do_format ;;
@@ -284,6 +302,14 @@ _dispatch() {
             return 1
             ;;
     esac
+}
+
+_dispatch_sentry() {
+    if [[ "${TOOLKIT_SENTRY_ENABLED:-false}" != "true" || -z "${SENTRY_ORG:-}" || -z "${ANDROID_SENTRY_PROJECT:-}" ]]; then
+        echo "✗ Sentry not configured. Set TOOLKIT_SENTRY_ENABLED=true, SENTRY_ORG, and ANDROID_SENTRY_PROJECT in build.properties."
+        return 1
+    fi
+    _sentry_dispatch "$ANDROID_SENTRY_PROJECT" "$@"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

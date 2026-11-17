@@ -33,7 +33,8 @@ Usage: ./build.sh android emulator <command>
                        start, with fresh system services
   create <name> [--image <package>] [--profile <device>]
                        Make an AVD of that name, unless one exists; prints its name.
-                       It gets the hardware of ANDROID_EMULATOR_AVD and the system image
+                       It gets the hardware of ANDROID_EMULATOR_AVD (or, while that AVD
+                       doesn't exist, ANDROID_EMULATOR_HARDWARE) and the system image
                        ANDROID_EMULATOR_IMAGE, or the given image and avdmanager device
                        profile (e.g. pixel_8)
   front [avd|serial]   Bring the app back to the front, as a tap on its icon does: the
@@ -188,14 +189,17 @@ _emulator_create() {
         echo "✗ The system image $image is not installed. Run: ./build.sh android setup"
         return 1
     fi
-    local source_config=""
+    local source_config="" hardware=""
     if [[ -z "$profile" ]]; then
         source_config="$HOME/.android/avd/${ANDROID_EMULATOR_AVD:-}.avd/config.ini"
-        if [[ -z "${ANDROID_EMULATOR_AVD:-}" || ! -f "$source_config" ]]; then
-            echo "✗ No AVD $ANDROID_EMULATOR_AVD to copy the hardware from; pass --profile <device>."
-            return 1
+        if [[ -n "${ANDROID_EMULATOR_AVD:-}" && -f "$source_config" ]]; then
+            profile=$(sed -n 's/^hw\.device\.name=//p' "$source_config" | head -1)
+        else
+            # The first AVD: the iOS reference phone's canvas.
+            source_config=""
+            profile="$ANDROID_EMULATOR_PROFILE"
+            hardware="$ANDROID_EMULATOR_HARDWARE"
         fi
-        profile=$(sed -n 's/^hw\.device\.name=//p' "$source_config" | head -1)
     fi
     local args=(create avd -n "$name" -k "$image")
     [[ -n "$profile" ]] && args+=(-d "$profile")
@@ -215,6 +219,17 @@ _emulator_create() {
         } > "$config.new"
         mv "$config.new" "$config"
         echo "✓ Made $name with the hardware of $ANDROID_EMULATOR_AVD ($image)"
+    elif [[ -n "$hardware" && -f "$config" ]]; then
+        local pair keys=""
+        for pair in $hardware; do
+            keys+="${keys:+|}$(sed 's/[.]/\\./g' <<<"${pair%%=*}")"
+        done
+        {
+            grep -vE "^($keys)=" "$config" || true
+            tr ' ' '\n' <<<"$hardware"
+        } > "$config.new"
+        mv "$config.new" "$config"
+        echo "✓ Made $name with the hardware of ANDROID_EMULATOR_HARDWARE ($image)"
     else
         echo "✓ Made $name ($profile, $image)"
     fi
