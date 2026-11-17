@@ -330,7 +330,7 @@ _android_debug() {
 
     local results
     results=$(mktemp)
-    _debug_follow "$app_id" "$pid" "$cat_filter" "$level_filter" "$script_names" "$timeout" "$results" < "$fifo"
+    _debug_follow "$app_id" "$pid" "$cat_filter" "$level_filter" "$script_names" "$timeout" "$results" "$logcat_pid" < "$fifo"
     kill "$logcat_pid" 2>/dev/null || true
     { wait "$logcat_pid"; } 2>/dev/null || true
     rm -f "$fifo"
@@ -346,10 +346,10 @@ _android_debug() {
 # DEBUG_SESSION_ENDED, when the launched process is gone, when the stream
 # ends, without a [scriptor] line in DEBUG_RUNNER_WAIT seconds of a scripted
 # run, or at the timeout. Sets _DEBUG_OUTCOME: ended, stopped, no-runner or
-# timeout.
+# timeout. Without a stream pid (recorded lines), the end of input ends it.
 _debug_follow() {
-    local app_id="$1" pid="$2" cat_filter="$3" level_filter="$4" script_names="$5" timeout="$6" results="$7"
-    local started=$SECONDS heard_runner=false line formatted status
+    local app_id="$1" pid="$2" cat_filter="$3" level_filter="$4" script_names="$5" timeout="$6" results="$7" stream_pid="${8:-}"
+    local started=$SECONDS heard_runner=false line formatted
     _DEBUG_OUTCOME="stopped"
     while true; do
         if IFS= read -r -t 2 line; then
@@ -380,9 +380,10 @@ _debug_follow() {
                 break
             fi
         else
-            status=$?
-            # Not a timeout: the stream ended.
-            (( status <= 128 )) && break
+            # bash 3.2 returns 1 both at a timeout and at the end of input.
+            if [[ -z "$stream_pid" ]] || ! kill -0 "$stream_pid" 2>/dev/null; then
+                break
+            fi
             if [[ -n "$pid" ]] && [[ "$(_app_pid "$app_id")" != "$pid" ]]; then
                 break
             fi
