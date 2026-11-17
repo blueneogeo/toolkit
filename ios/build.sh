@@ -3441,6 +3441,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     e2e-run          Run built e2e tests without rebuilding (TOOLKIT_E2E_ENABLED)
     upload [--force] <text>
                        Build, sign, upload to TestFlight (TOOLKIT_UPLOAD_ENABLED)
+    preflight          The upload's Release build and its checks, without uploading
     sentry <cmd>     Sentry queries (TOOLKIT_SENTRY_ENABLED)
 
 Options:
@@ -3552,6 +3553,7 @@ _dispatch() {
         e2e-run)  do_e2e true ;;
         sentry)   shift; _dispatch_sentry "$@" ;;
         upload)   shift; do_upload "$@" ;;
+        preflight) do_preflight ;;
         testflight) shift; do_testflight "$@" ;;
         update-toolkit) do_update_toolkit ;;
         configure) do_configure ;;
