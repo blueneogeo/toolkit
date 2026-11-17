@@ -181,6 +181,18 @@ _record_launch_scripts() {
         export "SIMCTL_CHILD_${script_var#SCRIPT_ENV_}=${!script_var}"
     done
     export SIMCTL_CHILD_TURN_DEBUG_SCRIPT_NAMES="$names" SIMCTL_CHILD_TURN_DEBUG_SCRIPT_NO_MARKER=1
+    # A relaunched app can keep the environment of its first launch, so the
+    # names also go in the launch file the app reads (as `ios debug` does),
+    # and the start-up marker is put down at once.
+    local data_dir config
+    data_dir=$(xcrun simctl get_app_container "$sim_id" "$BUNDLE_ID" data 2>/dev/null || true)
+    if [[ -n "$data_dir" ]]; then
+        config=$(mktemp)
+        _write_script_config "$config" "$names"
+        mkdir -p "$data_dir/Library/Caches"
+        mv "$config" "$data_dir/Library/Caches/scriptor-config.json"
+        touch "$data_dir/Library/Caches/${DEBUG_MARKER_NAME:-scriptor-ready}"
+    fi
     local extra=()
     read -r -a extra <<< "${IOS_LAUNCH_ARGS:-}"
     echo "  running debug script(s): $names"
