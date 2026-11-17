@@ -101,22 +101,30 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
   Local dev:
     build              Format, lint (ktlint, detekt) and assemble the configured build type
     clean              Gradle clean, and remove build/ (screenshots, recordings)
-    install [target] [--quiet|-q]   Build, install, adb reverse the server port, launch
+    install [target] [--quiet|-q] [--no-launch]
+                       Build, install, adb reverse the server port, launch. --no-launch
+                       installs and compiles as Play does without opening the app, so the
+                       next launch is the first after an install
     launch [target] -- [extras...]  Launch the installed app, forwarding am start extras
                        (e.g. --ez turnMuted true); builds first when no APK exists
     uninstall [target] Stop the watcher and the app, and uninstall it. The emulator keeps
                        running; other work shares it ('emulator stop' shuts it down)
-    test [filter] [timeout] [--no-build]
+    test [filter] [timeout] [--no-build|--build-only]
                        Run unit tests; filter by class name (or Class/method), timeout
                        in seconds (default $TEST_TIMEOUT). Gradle builds only what changed,
-                       so --no-build is accepted and changes nothing
+                       so --no-build is accepted and changes nothing; --build-only builds
+                       the tests without running them (and without the local server)
+    test instrumented [filter] [timeout] [--build-only]
+                       Run the tests under src/androidTest on the emulator or a phone
     lint               ktlint, detekt, the parity gate and Android Lint on all sources
     format             Auto-format all Kotlin sources with ktlint
     doctor [--quick] [--json] [--watch [minutes]]
                        Check the machine, the SDK, the emulator and the server
                        ('./build.sh android doctor --help')
-    logs [target] [--cat <cat>] [--level <level>] [N]  Show the app's last N log lines (default 10)
-    logs [target] [--cat <cat>] [--level <level>] tail Stream the app's logs
+    logs [target] [--cat <cat>] [--level <level>] [--process <name|all>] [--minutes M] [N]
+                 Show the last N lines (default 10) of the last M minutes (default 15),
+                 from the app, another process (e.g. system_server) or all of them
+    logs [target] [--cat <cat>] [--level <level>] tail  Stream live app logs
     debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build] [--timeout N]
                        Build (or with --no-build, just relaunch), launch, and trace logs
                        (stops when the app goes to the background or a script run ends).
@@ -130,9 +138,14 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        Sign the emulator out (runs the sign_out debug script)
 
   Screen:
-    emulator <start|stop|status>
-                       Boot the configured AVD (ANDROID_EMULATOR_AVD), shut it down,
-                       or show what is connected
+    emulator <start|stop|status|restart|create|front|contact|text-size|push>
+                       Boot an AVD (ANDROID_EMULATOR_AVD by default), shut it down, show
+                       what is connected, boot it again from cold, make an AVD, bring the
+                       app to the front, add contacts the app may read, set the text size,
+                       or hand the app a push ('./build.sh android emulator' shows the full help)
+    push <payload.json>
+                       Hand a push payload to the app's debug push receiver on the emulator;
+                       no FCM is involved
     screenshot [target] [name]
                        Capture the emulator's or phone's screen to build/screenshots/;
                        prints the device it captured from and the absolute path last
@@ -248,10 +261,11 @@ _dispatch() {
         emulator)
             shift
             case "${1:-}" in
-                start|stop) _lock_take emulator || return 1 ;;
+                start|stop|restart|front|contact|text-size|push) _lock_take emulator || return 1 ;;
             esac
             do_emulator "$@"
             ;;
+        push)        shift; _lock_take emulator && do_push "$@" ;;
         screenshot)  shift; _lock_take emulator && do_screenshot "$@" ;;
         screenshots) shift; do_screenshots_collect "$@" ;;
         see)         shift; _lock_take emulator && do_see "$@" ;;

@@ -20,8 +20,9 @@ Usage: ./build.sh android lock <gradle|emulator> -- <command...>
   20 minutes (TOOLKIT_LOCK_TIMEOUT, in seconds) and then fails.
 
   build, test, lint and format take the gradle lock while Gradle runs; install,
-  launch, uninstall, debug, record, screenshot, screenshots collect, see, ui and
-  emulator start|stop take the emulator lock. Commands run inside 'lock' reuse
+  launch, uninstall, debug, record, screenshot, screenshots collect, see, ui,
+  push, test instrumented, watch and every emulator command except status and
+  create take the emulator lock. Commands run inside 'lock' reuse
   the lock they already hold, so one lock can cover install, a script run and
   collecting its frames:
 

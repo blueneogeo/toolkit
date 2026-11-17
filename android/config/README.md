@@ -17,14 +17,14 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `build-device.sh` | Target selection, `screenshot`, `screenshots collect`, `see` |
 | `build-record.sh` | `record` |
 | `build-ui.sh` | `ui` |
-| `build-emulator.sh` | `emulator start\|stop\|status` |
+| `build-emulator.sh` | `emulator start\|stop\|status\|restart\|create\|front\|contact\|text-size\|push`, `push` |
 | `build-lock.sh` | `lock` |
 | `build-overnight.sh` | `night init`, `blocker add`, the overnight folder |
 | `build-worktree.sh` | `worktree new\|remove\|list` |
 | `build-doctor.sh` | `doctor` |
 | `build-sync.sh` | `sync`, and the parity gate in `build` and `lint` |
 
-`toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `logfmt.sh` (`--level`), `scripts.sh` (script names), `vision.sh`, and `parity/` (the extractors and `parity.py` behind `sync`).
+`toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `logfmt.sh` (`--level`), `scripts.sh` (script names and the check summary of `debug`), `vision.sh`, and `parity/` (the extractors and `parity.py` behind `sync`).
 
 ## Settings
 
@@ -44,6 +44,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `ANDROID_BUILD_TOOLS` | none | Build tools version `doctor` checks, `37.0.0` |
 | `SERVER_PORT` | `8080` | The local server's port, reversed onto the device |
 | `SERVER_HEALTH_URL` | `http://localhost:<port>/api/health` | What `test` and `doctor` ask |
+| `ANDROID_PUSH_RECEIVER` | `.debug.DebugPushReceiver` | The debug-only receiver `push` broadcasts to; `package/class`, or a class where a leading `.` means the module's namespace |
 | `TOOLKIT_SERVER_ENABLED` | `false` | `adb reverse` on every launch, server check before tests |
 | `TOOLKIT_DEBUG_SCRIPTS` | `false` | `debug --script` and `record --script` |
 | `TOOLKIT_LOGS_ENABLED` | `true` | `logs` and `debug` |
@@ -86,7 +87,8 @@ A lone argument to `screenshot` or `record` is the target only when it is one of
 |---|---|
 | `build` | `ktlintFormat`, then `ktlintCheck` and `detekt` (each when the Gradle build applies the plugin) and the arch checks, then `:app:assemble<Type>`. Prints `✓ Format passed`, `✓ Lint passed`, `✓ Build complete`. |
 | `clean` | `gradle clean` and removes `build/` (screenshots, recordings, logs). |
-| `test [filter] [timeout] [--no-build]` | `:app:test<Type>UnitTest --rerun`. The filter is a class name (`FeedLoadTests`) or `Class/method`. Stops Gradle after the timeout (120 s). Prints the verdict from the JUnit reports: `✓ 12 tests passed` or `✗ 2 of 12 tests failed:` and one line per failure. `--no-build` is accepted; Gradle compiles only what changed anyway. Asks the server first when `TOOLKIT_SERVER_ENABLED=true`. |
+| `test [filter] [timeout] [--no-build\|--build-only]` | `:app:test<Type>UnitTest --rerun`. The filter is a class name (`FeedLoadTests`) or `Class/method`. Stops Gradle after the timeout (120 s). Prints the verdict from the JUnit reports: `✓ 12 tests passed` or `✗ 2 of 12 tests failed:` and one line per failure. `--no-build` is accepted; Gradle compiles only what changed anyway. Asks the server first when `TOOLKIT_SERVER_ENABLED=true`. `--build-only` compiles the tests (`:app:compile<Type>UnitTestKotlin`) without running them and without asking the server, and prints `✓ Tests build`. |
+| `test instrumented [filter] [timeout] [--build-only]` | `:app:connected<Type>AndroidTest` on one device: the `--device` selector, else the running emulator (booted when nothing is connected), else the one phone. A filter `Class` or `Class/method` is looked up under `src/androidTest` for its package and passed as the runner's `class` argument; a dotted name is passed as it is. Same timeout and verdict as `test`, from the reports in `build/outputs/androidTest-results/connected/`. `--build-only` assembles the test APK (`:app:assemble<Type>AndroidTest`). Takes the emulator lock. |
 | `lint` | The `build` checks, then Android Lint (`:app:lint<Type>`). |
 | `format` | `ktlintFormat`. |
 
@@ -96,10 +98,10 @@ Gradle's output goes to `build/logs/gradle-<command>.log`. On failure the toolki
 
 | Command | Does |
 |---|---|
-| `install [target] [--quiet] [--fixture [slot]]` | `build`, then `adb install -r -d`, `adb reverse tcp:8080 tcp:8080` (with the server on) and `am start -W -S`. `--quiet` is accepted for iOS parity; the emulator window is never brought forward. |
+| `install [target] [--quiet] [--no-launch] [--fixture [slot]]` | `build`, then `adb install -r -d`, `adb reverse tcp:8080 tcp:8080` (with the server on) and `am start -W -S`. `--quiet` is accepted for iOS parity; the emulator window is never brought forward. `--no-launch` installs without opening the app and compiles it with `cmd package compile -m speed-profile -f`, the state a Play install leaves, so the next launch is the first after an install (for launch measurements); it prints `✓ Installed, not launched`. |
 | `launch [target] [--fixture [slot]] -- [extras...]` | Installs the built APK and launches it, forwarding am start extras (`--es key value`, `--ez key true`). Builds first when there is no APK. |
 | `uninstall [target]` | Stops the watcher and the app and uninstalls it. Unlike iOS, which shuts the simulator down, the emulator keeps running: other work shares it. |
-| `logs [target] [--cat <cat>] [--level <level>] [N\|tail]` | The app's log lines (tag `ANDROID_LOG_TAG`) as `HH:MM:SS.mmm  LEVEL [cat] msg`. `--cat all` shows every line of the running app's process. `tail` streams new lines. |
+| `logs [target] [--cat <cat>] [--level <level>] [--process <name\|all>] [--minutes M] [N\|tail]` | The last N lines (default 10) of the last M minutes (default 15) of the app's log lines (tag `ANDROID_LOG_TAG`) as `HH:MM:SS.mmm  LEVEL [cat] msg`. `--cat all` shows every line of the running app's process. `--process <name>` shows every line of that running process (`pidof`), for example `system_server`, whose `ActivityManager` lines say why an app process died; `--process all` every line on the device. Other tags read `HH:MM:SS.mmm  P/Tag: msg`. `tail` streams new lines of the app and takes neither `--process` nor `--minutes`. |
 | `debug [target] [--cat] [--level] [--script <names>] [--no-build] [--timeout N] [--fixture [slot]]` | Below. |
 | `signin [target] [email code]` / `signout [target]` | `debug <target> --no-build --script sign_in` or `sign_out`; the target defaults to `emulator`. The login comes from `SCRIPT_ENV_TURN_LOGIN_EMAIL` and `_CODE`, or the two arguments. |
 
@@ -120,9 +122,15 @@ The target and the flags come in any order. A second target or an unknown flag s
 
 | Command | Does |
 |---|---|
-| `emulator start [--window]` | Boots the configured AVD, headless unless `--window`, and waits until Android has finished booting. Its log is `build/emulator/emulator.log`. |
+| `emulator start [avd] [--window]` | Boots the AVD (default `ANDROID_EMULATOR_AVD`), headless unless `--window`, and waits until Android has finished booting. Its log is `build/emulator/emulator.log`. |
 | `emulator stop` | Shuts the running emulator down. |
 | `emulator status` | Lists the connected emulators (with their AVD) and phones (with their model). |
+| `emulator restart [avd\|serial]` | Shuts the running emulator down (`adb emu kill`) and boots the same AVD headless with `-no-snapshot-load`, a cold start with fresh system services, as `ios simulator restart`. |
+| `emulator create <name> [--image <package>] [--profile <device>]` | Makes an AVD with `avdmanager`, unless one of that name exists, and prints its name last. Without `--profile` it copies the hardware of `ANDROID_EMULATOR_AVD` (screen, density, memory, cameras, no microphone, no Play Store); the image is `ANDROID_EMULATOR_IMAGE` unless `--image`. For `Turn_Min` (`--image "system-images;android-31;google_apis;arm64-v8a"`) and `Turn_Journey`. |
+| `emulator front [avd\|serial]` | Brings the app forward with the launcher's own intent (`MAIN`, `LAUNCHER`, `--activity-reorder-to-front`), as a tap on its icon: the running process keeps its state. Starts the app when it isn't running. |
+| `emulator contact [avd\|serial] <file.vcf>` | Reads the vCard's cards (name from `FN` or `N`, every `EMAIL` and `TEL`), adds each as a contact through `content insert` on `raw_contacts` and `data`, copies the file to `/sdcard/Download/`, and grants the app `READ_CONTACTS`. Says so when the app isn't installed or doesn't ask for the permission. The Contacts app's import needs a tap, so it isn't used. |
+| `emulator text-size [size]` | Sets `font_scale` from the iOS Dynamic Type names: extra-small 0.82, small 0.88, medium 0.94, large 1.0, extra-large 1.12, extra-extra-large 1.24, extra-extra-extra-large 1.35, accessibility-medium 1.64, accessibility-large 1.95, accessibility-extra-large 2.35, accessibility-extra-extra-large 2.76, accessibility-extra-extra-extra-large 3.12. No size prints the current one. Android caps nonlinear scaling at 2.0 on API 34+, so the top three look alike there. |
+| `push <payload.json>`, `emulator push <payload.json>` | Hands the payload, compacted to one line, to the debug build's receiver with `am broadcast -n <app>/<receiver> --es payload <json>`. The receiver is `ANDROID_PUSH_RECEIVER`, default `.debug.DebugPushReceiver` (a leading `.` means the module's `namespace`, so Turn's is `com.sendaturn.app.debug.DebugPushReceiver`); it hands the payload to the code the messaging service calls. Refuses when the installed app has no such receiver. No FCM is involved. |
 | `screenshot [target] [name]` | Saves the screen to `build/screenshots/<name>.png` (default `turn_<date>-<time>.png`), says which device it came from, and prints the absolute path last. |
 | `screenshots collect [target]` | Copies the PNGs debug scripts saved in the app's `files/DebugScreenshots` (through `run-as`, or for builds that aren't debuggable from `/sdcard/Android/data/<app>/files/DebugScreenshots`) into `build/screenshots/`. Prints each path, then `✓ Collected N screenshot(s)`. Same names overwrite. |
 | `see [target] [--focus "<question>"]` | Captures the screen and describes it with the vision model (`toolkit/shared/vision.sh`). For models that can't read images. |
@@ -153,7 +161,7 @@ Every `ui` action except `describe` takes a screenshot afterwards and prints its
 | `worktree list` | The package worktrees and their branches. |
 | `doctor [--quick] [--json] [--watch [minutes]]` | Below. |
 
-Commands take the locks themselves: Gradle calls the gradle lock; `install`, `launch`, `uninstall`, `debug`, `record`, `screenshot`, `screenshots collect`, `see`, `ui` and `emulator start|stop` the emulator lock (after building, so no one holds the emulator while waiting for Gradle). Commands run under `lock` reuse the lock they hold (`TOOLKIT_LOCKS_HELD`), so one lock covers a sequence:
+Commands take the locks themselves: Gradle calls the gradle lock; `install`, `launch`, `uninstall`, `debug`, `record`, `screenshot`, `screenshots collect`, `see`, `ui`, `push`, `test instrumented`, `watch` and every `emulator` command except `status` and `create` the emulator lock (after building, so no one holds the emulator while waiting for Gradle). Commands run under `lock` reuse the lock they hold (`TOOLKIT_LOCKS_HELD`), so one lock covers a sequence:
 
 ```
 ./build.sh android lock emulator -- sh -c './build.sh android debug --script lens_check && ./build.sh android screenshots collect'
