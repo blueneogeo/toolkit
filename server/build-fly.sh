@@ -33,20 +33,20 @@ _fly_db_backup() {
 
 # Runs SQL on the live database through a temporary proxy, as one
 # transaction that stops at the first error. It is read-only unless --write
-# is given; a write asks before running and takes a backup first.
+# is given; a write needs the owner's Touch ID (nothing skips it) and takes a
+# backup first.
 _fly_sql() {
     local read_only=1 sql=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --write) read_only=0; shift ;;
-            --force) shift ;;
             *) sql="$1"; shift ;;
         esac
     done
     if [[ -z "$sql" ]]; then
-        echo "Usage: ./build.sh server live sql [--write [--force]] '<sql>'"
+        echo "Usage: ./build.sh server live sql [--write] '<sql>'"
         echo "  Runs SQL on the live database as one transaction, read-only by default."
-        echo "  --write allows changes: it asks first (--force skips that) and takes a database backup."
+        echo "  --write allows changes: it asks for Touch ID first and takes a database backup."
         return 1
     fi
     if ! command -v psql &>/dev/null; then
@@ -65,11 +65,15 @@ _fly_sql() {
     dbname=$(echo "$creds" | jq -r '.credentials.dbname')
 
     if [[ $read_only -eq 0 ]]; then
-        _confirm_live "Live SQL on $FLY_DB_CLUSTER
-
-    $sql
-
-    A database backup is taken first." || return 1
+        echo ""
+        echo "  Live SQL on $FLY_DB_CLUSTER, after a database backup:"
+        echo "$sql" | sed 's/^/    /'
+        echo ""
+        echo "  → Touch ID to allow this change..."
+        if ! swift "$TOOLKIT_DIR/../shared/touchid.swift" "change the live Turn database" 2>/dev/null; then
+            echo "  ✗ Not allowed: Touch ID was not given. Nothing changed."
+            return 1
+        fi
         echo "→ Taking a database backup..."
         local backup
         backup=$(_fly_db_backup) || return 1
@@ -137,14 +141,22 @@ _fly_status() {
     latest_release=$(fly releases --app "$FLY_APP" --json 2>/dev/null | jq -r 'first // empty | "v\(.Version) (\(.CreatedAt[:19] | sub("T";" ")))"' 2>/dev/null || true)
     echo "  Release:    $latest_release"
 
-    echo "$app_json" | jq -r '.Machines[]? | "\(.state // "?")|\(.region // "?")|\(.id[:12])"' | while IFS='|' read -r state region mid; do
+    # The public health URL reaches whichever machine Fly picks, so each
+    # running machine's own check is listed too.
+    echo "$app_json" | jq -r '.Machines[]? | "\(.state // "?")|\(.region // "?")|\(.id[:14])|\(.checks[0].status // "none")"' | while IFS='|' read -r state region mid check; do
         case "$state" in
             started) mark="$(_tty_green)✓$(_tty_reset)"; label="running" ;;
             stopped) mark="$(_tty_yellow)○$(_tty_reset)"; label="idle (auto-stop)" ;;
             *)       mark="$(_tty_red)✗$(_tty_reset)"; label="$state" ;;
         esac
+        if [[ "$state" == "started" && "$check" != "passing" ]]; then
+            mark="$(_tty_red)✗$(_tty_reset)"
+            label="running, health check $check"
+        fi
         printf '  %b machine %s  region=%s  %s\n' "$mark" "$mid" "$region" "$label"
     done
+    local failing_machines
+    failing_machines=$(echo "$app_json" | jq -r '[.Machines[]? | select(.state == "started" and (.checks[0].status // "none") != "passing") | .id] | join(", ")' 2>/dev/null)
 
     # ── Database ─────────────────────────────────────────────────
     echo ""
@@ -226,6 +238,9 @@ _fly_status() {
     if [[ "$db_status" != "ready" ]]; then
         all_ok=false
     fi
+    if [[ -n "$failing_machines" ]]; then
+        all_ok=false
+    fi
 
     if $all_ok; then
         echo -e "  ${GREEN}${BOLD}✓ All systems healthy${RESET}"
@@ -233,6 +248,7 @@ _fly_status() {
         echo -e "  ${RED}${BOLD}✗ Issues detected — review details above${RESET}"
         [[ "$hstatus" != "healthy" ]] && echo -e "  ${RED}→ Health check: $hstatus${RESET}"
         [[ "$db_status" != "ready" ]] && echo -e "  ${RED}→ Database: $db_status${RESET}"
+        [[ -n "$failing_machines" ]] && echo -e "  ${RED}→ Machines failing their health check: $failing_machines${RESET}"
     fi
 
     echo ""
@@ -605,7 +621,7 @@ _fly_deploy() {
         local _deploy_out="$PROJECT_ROOT/.watch/deploy-build.log"
         local _deploy_filter='(^==>|^✓ Configuration|^--> Building image done|^image size:|^Visit your|^✗|[Ee]rror|[Ff]ail)'
         mkdir -p "$(dirname "$_deploy_out")"
-        if fly deploy --app "$FLY_APP" --strategy "$DEPLOY_STRATEGY" 2>&1 | tee "$_deploy_out" | grep --line-buffered -E "$_deploy_filter" | sed -e 's/^==>/  →/' -e 's/^image size:/  image size:/' -e 's/^Visit your/  Visit your/'; then
+        if fly deploy --app "$FLY_APP" --strategy "$DEPLOY_STRATEGY" --build-arg "SERVER_VERSION=$commit" 2>&1 | tee "$_deploy_out" | grep --line-buffered -E "$_deploy_filter" | sed -e 's/^==>/  →/' -e 's/^image size:/  image size:/' -e 's/^Visit your/  Visit your/'; then
             _deploy_rc=0
         else
             _deploy_rc=${PIPESTATUS[0]}
@@ -703,7 +719,7 @@ _fly_deploy() {
         if do_test e2e live; then
             echo "  ✓ end-to-end test passed"
         else
-            echo "  ✗ end-to-end test failed — the deploy is live; see above, or roll back with: ./build.sh server rollback"
+            echo "  ✗ end-to-end test failed — the deploy is live; see above, or roll back with: ./build.sh server live rollback"
         fi
     fi
 

@@ -171,7 +171,7 @@ do_start() {
     do_build
 
     mkdir -p "$(dirname "$PID_FILE")"
-    nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1 &
+    (cd "$PROJECT_ROOT" && exec nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1) &
     echo "$!" > "$PID_FILE"
 
     sleep "$STARTUP_DELAY"
@@ -202,7 +202,7 @@ do_watch() {
     do_build
 
     mkdir -p "$(dirname "$PID_FILE")"
-    nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1 &
+    (cd "$PROJECT_ROOT" && exec nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1) &
     local server_pid=$!
     echo "$server_pid" > "$PID_FILE"
 
@@ -221,7 +221,7 @@ do_watch() {
             _register_firewall
             kill "$server_pid" 2>/dev/null || true
             sleep "$RESTART_DELAY"
-            nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1 &
+            (cd "$PROJECT_ROOT" && exec nohup "$PROJECT_ROOT/$SERVER_BIN_PATH" > "$LOG_FILE" 2>&1) &
             server_pid=$!
             echo "$server_pid" > "$PID_FILE"
             echo "[$(date '+%H:%M:%S')] ✓ Restarted (PID $server_pid)"
@@ -250,12 +250,13 @@ do_test() {
     do_sqlc || return 1
     _check_quality || return 1
 
-    # Parse optional timeout from args (any bare number is treated as a timeout override)
+    # Parse optional timeout from args (a bare number is a timeout override,
+    # except the pattern right after "run")
     local timeout="${TEST_TIMEOUT}s"
     local -a filtered=()
     local arg
     for arg in "$@"; do
-        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+        if [[ "$arg" =~ ^[0-9]+$ && ! ( ${#filtered[@]} -eq 1 && "${filtered[0]}" = "run" ) ]]; then
             timeout="${arg}s"
         else
             filtered+=("$arg")
@@ -276,6 +277,16 @@ do_test() {
         echo "✗ 'test ${1}' is replaced by 'test e2e [local|live]', which reads the emails that really arrive."
         rm -f "$test_log"
         return 1
+    elif [ "${1:-}" = "e2e" ] && [ "${2:-}" = "headers" ]; then
+        # The full headers of every email one run received, read from the
+        # inbox (the saved copies keep only the body).
+        _load_env
+        if [[ -z "${3:-}" || -z "${RESEND_API_KEY:-}" || -z "${E2E_INBOX_DOMAIN:-}" ]]; then
+            echo "✗ Usage: test e2e headers <run>, e.g. 1019-105649 (needs RESEND_API_KEY and E2E_INBOX_DOMAIN)."
+            rm -f "$test_log"
+            return 1
+        fi
+        (cd "$PROJECT_ROOT" && E2E_HEADERS_RUN="$3" go test -timeout 120s -tags=e2e ./internal/e2e -run '^TestInboxHeaders$' -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "e2e" ]; then
         # Plays Turn's users against a running server through its API and
         # reads the emails that really arrive (internal/e2e).
@@ -317,10 +328,17 @@ do_test() {
         export APP_BASE_URL="$live_url"
         _require_server "$live_url/api/health"
         (cd "$PROJECT_ROOT" && go test -timeout "$timeout" -tags=live ./internal/livetest -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
+    elif [ "${1:-}" = "run" ]; then
+        (cd "$PROJECT_ROOT" && go test -timeout "$timeout" "${3:-./...}" -run "${2:?Usage: test run <pattern> [package]}" -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     else
         (cd "$PROJECT_ROOT" && go test -timeout "$timeout" ./... -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     fi
 
+    if [[ $test_exit -eq 0 && "${1:-}" = "run" ]] && ! grep -q -- '--- PASS' "$test_log"; then
+        rm -f "$test_log"
+        echo "✗ No test matches '${2}'"
+        return 1
+    fi
     if [[ $test_exit -eq 0 ]]; then
         local pkg_count
         pkg_count=$(grep -c '^ok ' "$test_log" 2>/dev/null || echo 0)
@@ -747,12 +765,14 @@ Usage: ./build.sh server [--server] <command> (--server accepted in any position
     debug        Stream raw server log lines (for combined debug)
     watch        Start + auto-rebuild on Go changes
     test [N] [subcommand]    Run all Go tests + lint (timeout in seconds, default $TEST_TIMEOUT)
+    test run <pattern> [pkg] Run the Go tests matching a -run pattern (package default ./...)
     test local               Check local server self-test health
     test live                Check production server self-test health
     test e2e [local|live]    End-to-end test: sign-up, invites, pushes, replies,
                              emails and every link in them, against a running
                              server (needs RESEND_API_KEY, E2E_INBOX_DOMAIN);
                              keeps each email in build/e2e-mail/
+    test e2e headers <run>   Full headers of every email a run received
     lint         Run golangci-lint
     format       Auto-format all Go sources (golangci-lint --fix)
     doctor       Check local server build prerequisites

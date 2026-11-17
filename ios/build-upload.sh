@@ -1,10 +1,12 @@
 # ios-toolkit/build-upload.sh — generic TestFlight deploy (gated by TOOLKIT_UPLOAD_ENABLED)
-# Provides: do_upload
+# Provides: do_upload, do_preflight
 # Depends on: PROJECT_ROOT (config), SCRIPT_DIR (build.sh)
 # Depends on: _TARGET_SDK, _TARGET_DEST, _TARGET_NAME, _BUILD_CONFIG, _BUILD_EXTRA (build.sh)
-# Depends on: _check_build_tools, _ensure_project, _do_build, do_doctor, _ruby_bundle_cmd (build.sh)
+# Depends on: _check_build_tools, _ensure_project, _do_build, _find_app, do_doctor, _ruby_bundle_cmd (build.sh)
 # Depends on: IOS_KEY_ID, IOS_ISSUER_ID, IOS_TEAM_ID (build.properties)
 # Config: DEPLOY_TAG_PREFIX (default ios/v), FASTLANE_LANE (default ios upload),
+#         FASTLANE_DISTRIBUTE_LANE (default ios distribute),
+#         TESTFLIGHT_GROUPS (external groups an upload goes to; empty: internal testers only),
 #         IOS_KEY_PATH (default $PROJECT_ROOT/AuthKey.p8)
 
 _require_upload() {
@@ -13,6 +15,81 @@ _require_upload() {
         echo "  Set TOOLKIT_UPLOAD_ENABLED=true in build.properties and run ./build.sh setup."
         return 1
     fi
+}
+
+# The Release build an upload makes first, for a generic iOS device and
+# unsigned, then the encryption check on what it built.
+_preflight_release() {
+    echo "  → building Release for generic iOS device (60-90s)..."
+    local _saved_sdk="$_TARGET_SDK"
+    local _saved_dest="$_TARGET_DEST"
+    local _saved_name="$_TARGET_NAME"
+    local _saved_cfg="${_BUILD_CONFIG:-}"
+    _TARGET_SDK="iphoneos"
+    _TARGET_DEST="generic/platform=iOS"
+    _TARGET_NAME="generic iOS device"
+    _BUILD_CONFIG="Release"
+    _BUILD_EXTRA="CODE_SIGNING_ALLOWED=NO"
+    local _preflight_out="$PROJECT_ROOT/.watch/preflight.log"
+    mkdir -p "$(dirname "$_preflight_out")"
+    local ok=1
+    if ( _do_build build ) > "$_preflight_out" 2>&1; then
+        echo "  ✓ Release build succeeded"
+        _check_encryption_answer "$(_find_app)" || ok=0
+    else
+        echo "  ✗ Release build failed. Full log: $_preflight_out"
+        tail -20 "$_preflight_out"
+        ok=0
+    fi
+    _TARGET_SDK="$_saved_sdk"
+    _TARGET_DEST="$_saved_dest"
+    _TARGET_NAME="$_saved_name"
+    _BUILD_CONFIG="$_saved_cfg"
+    _BUILD_EXTRA=""
+    [[ $ok -eq 1 ]]
+}
+
+# An app whose Info.plist says it uses no encryption beyond Apple's
+# (ITSAppUsesNonExemptEncryption NO) must not carry a crypto library of its
+# own, such as BoringSSL or OpenSSL: App Store Connect would want export
+# documents for it.
+_check_encryption_answer() {
+    local app="$1"
+    if [[ -z "$app" || ! -d "$app" ]]; then
+        echo "  ✗ The Release build's app wasn't found, so its encryption can't be checked"
+        return 1
+    fi
+    local answer
+    answer=$(/usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$app/Info.plist" 2>/dev/null || true)
+    if [[ "$answer" != "false" ]]; then
+        echo "  ✓ The app tells Apple it uses encryption beyond Apple's (ITSAppUsesNonExemptEncryption ${answer:-unset})"
+        return 0
+    fi
+    # grep -c reads to the end: grep -q would stop early and, with pipefail,
+    # turn a hit into a miss.
+    local file kind hits found=""
+    while IFS= read -r file; do
+        kind=$(file -b "$file")
+        [[ "$kind" == *Mach-O* ]] || continue
+        hits=$(strings "$file" | grep -c -E "BoringSSL|OPENSSL_" || true)
+        if [[ "${hits:-0}" -gt 0 ]]; then
+            found+="    ${file#"$app"/} ($hits)"$'\n'
+        fi
+    done < <(find "$app" -type f -perm +111)
+    if [[ -n "$found" ]]; then
+        echo "  ✗ The app tells Apple it uses only Apple's encryption, but these carry BoringSSL or OpenSSL:"
+        printf "%s" "$found"
+        return 1
+    fi
+    echo "  ✓ Only Apple's encryption in the app, as its Info.plist tells Apple"
+}
+
+# ./build.sh ios preflight: the upload's Release build and checks, without
+# uploading.
+do_preflight() {
+    _check_build_tools
+    _ensure_project
+    _preflight_release
 }
 
 do_upload() {
@@ -174,35 +251,7 @@ do_upload() {
     local step_start=$SECONDS
     echo ""
     echo "[2/4] Pre-flight build"
-    echo "  → building Release for generic iOS device (60-90s)..."
-    local _saved_sdk="$_TARGET_SDK"
-    local _saved_dest="$_TARGET_DEST"
-    local _saved_name="$_TARGET_NAME"
-    local _saved_cfg="${_BUILD_CONFIG:-}"
-    _TARGET_SDK="iphoneos"
-    _TARGET_DEST="generic/platform=iOS"
-    _TARGET_NAME="generic iOS device"
-    _BUILD_CONFIG="Release"
-    _BUILD_EXTRA="CODE_SIGNING_ALLOWED=NO"
-    local _preflight_out="$PROJECT_ROOT/.watch/preflight.log"
-    mkdir -p "$(dirname "$_preflight_out")"
-    if ( _do_build build ) > "$_preflight_out" 2>&1; then
-        echo "  ✓ Release build succeeded"
-    else
-        echo "  ✗ Release build failed. Full log: $_preflight_out"
-        tail -20 "$_preflight_out"
-        _TARGET_SDK="$_saved_sdk"
-        _TARGET_DEST="$_saved_dest"
-        _TARGET_NAME="$_saved_name"
-        _BUILD_CONFIG="$_saved_cfg"
-        _BUILD_EXTRA=""
-        return 1
-    fi
-    _TARGET_SDK="$_saved_sdk"
-    _TARGET_DEST="$_saved_dest"
-    _TARGET_NAME="$_saved_name"
-    _BUILD_CONFIG="$_saved_cfg"
-    _BUILD_EXTRA=""
+    _preflight_release || return 1
     echo "  ⏱  $((SECONDS - step_start))s"
 
     # ── Step 3: Archive + sign + upload ─────────────────────────
@@ -232,11 +281,13 @@ do_upload() {
     build_number="${existing_tag#${tag_prefix}}"
     build_number="${build_number:-1}"
 
-    local _upload_filter='(\*\* ARCHIVE SUCCEEDED|Successfully exported and signed the ipa file:|Successfully uploaded the new binary|Successfully finished processing|✗|\*\* BUILD FAILED|fatal error|^error)'
+    local _upload_filter='(\*\* ARCHIVE SUCCEEDED|Successfully exported and signed the ipa file:|Successfully uploaded the new binary|Successfully finished processing|upload succeeded|Waiting for Apple|handed to|✗|\*\* BUILD FAILED|fatal error|^error)'
     if IOS_KEY_ID="$IOS_KEY_ID" \
         IOS_ISSUER_ID="$IOS_ISSUER_ID" \
         IOS_TEAM_ID="$IOS_TEAM_ID" \
         BUILD_NUMBER="$build_number" \
+        IOS_BUNDLE_ID="$IOS_BUNDLE_ID" \
+        TESTFLIGHT_GROUPS="${TESTFLIGHT_GROUPS:-}" \
         IOS_KEY_PATH="$key_path" \
         CHANGELOG="$deploy_text" \
         MATCH_PASSWORD="$MATCH_PASSWORD" \
@@ -275,4 +326,31 @@ do_upload() {
     local total_duration=$((SECONDS - total_start))
     echo "=== Done: $existing_tag, build $build_number (${total_duration}s) ==="
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) deploy $existing_tag done build=$build_number commit=$commit by=$deployer duration=${total_duration}s text=\"${deploy_text//$'\n'/ }\"" >> "$deploy_log"
+}
+
+# do_testflight gives an uploaded build to the external groups in
+# TESTFLIGHT_GROUPS, with notes from the argument or else from its tag.
+do_testflight() {
+    _require_upload || return 1
+    local build_number="${1:-}" notes="${2:-}"
+    if [[ ! "$build_number" =~ ^[0-9]+$ ]]; then
+        echo "Usage: ./build.sh ios testflight <build> [notes]"
+        return 1
+    fi
+    if [[ -z "${TESTFLIGHT_GROUPS:-}" ]]; then
+        echo "✗ TESTFLIGHT_GROUPS is empty in build.properties"
+        return 1
+    fi
+    local tag="${DEPLOY_TAG_PREFIX:-ios/v}$build_number"
+    if [[ -z "$notes" ]]; then
+        notes=$(git -C "$PROJECT_ROOT" tag -l "$tag" --format='%(contents:subject)' | sed -n 's/.*| text: //p')
+    fi
+    local key_path="${IOS_KEY_PATH:-$PROJECT_ROOT/AuthKey.p8}"
+    echo "→ build $build_number to $TESTFLIGHT_GROUPS"
+    (cd "$PROJECT_ROOT" && IOS_KEY_ID="$IOS_KEY_ID" IOS_ISSUER_ID="$IOS_ISSUER_ID" IOS_KEY_PATH="$key_path" \
+        IOS_BUNDLE_ID="$IOS_BUNDLE_ID" BUILD_NUMBER="$build_number" TESTFLIGHT_GROUPS="$TESTFLIGHT_GROUPS" CHANGELOG="$notes" \
+        $(_ruby_bundle_cmd) exec fastlane ${FASTLANE_DISTRIBUTE_LANE:-ios distribute} 2>&1 \
+        | grep --line-buffered -E '(Waiting for Apple|handed to|Successfully|error|Error|✗)' \
+        | sed -E -l -e 's/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]: //' -e 's/'$'\x1b''\[[0-9;]*m//g' -e 's/^/  /')
+    return "${PIPESTATUS[0]}"
 }

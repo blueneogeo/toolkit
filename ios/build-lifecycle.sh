@@ -1,5 +1,5 @@
 # ios-toolkit/build-lifecycle.sh — generic app process/install/launch/redeploy
-# Provides: _app_running, _wait_for_app, _terminate_app, _install_app, _launch_app, _redeploy
+# Provides: _app_running, _wait_for_app, _terminate_app, _install_app, _prune_model_cache, _launch_app, _redeploy
 # Depends on: BUNDLE_ID, APP_EXECUTABLE, SIM_ID, SIM_NAME (build.sh)
 # Depends on: _TARGET_SDK, _TARGET_NAME, _TARGET_DEST, DEVICE_UDID (build.sh)
 # Depends on: _find_app, _do_build (build.sh)
@@ -65,7 +65,18 @@ _install_app() {
 
     case "$_TARGET_SDK" in
         iphonesimulator)
-            xcrun simctl install "$SIM_ID" "$app_path" 2>/dev/null || true
+            # A launch of the build already installed there keeps that copy:
+            # installing it again only costs time.
+            local stamp fingerprint
+            stamp="$(dirname "$app_path")/.installed-$SIM_ID"
+            fingerprint=$(find "$app_path" -type f -print0 | xargs -0 stat -f '%m %z %N' | shasum)
+            if [[ -f "$stamp" && "$(cat "$stamp")" == "$fingerprint" ]] \
+                && xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" >/dev/null 2>&1; then
+                return 0
+            fi
+            if xcrun simctl install "$SIM_ID" "$app_path" 2>/dev/null; then
+                echo "$fingerprint" > "$stamp"
+            fi
             ;;
         iphoneos)
             [[ -z "${DEVICE_UDID:-}" ]] && { echo "✗ Device UDID unknown."; return 1; }
@@ -81,6 +92,34 @@ _install_app() {
             fi
             ;;
     esac
+}
+
+# ── Compiled model cache ────────────────────────────────────────────
+
+# Core ML compiles an app's models into Caches/com.apple.e5rt.e5bundlecache,
+# keyed by where the model lies. Every simulator install moves the app, so
+# each one leaves a copy that is never read again. The copies from the
+# newest launch (written within ten minutes of the newest one) stay.
+_prune_model_cache() {
+    local data cache newest dir mtime removed=0 freed=0 size
+    data=$(xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" data 2>/dev/null) || return 0
+    while IFS= read -r cache; do
+        newest=$(find "$cache" -mindepth 2 -maxdepth 2 -type d -exec stat -f %m {} + 2>/dev/null | sort -n | tail -1 || true)
+        [[ -z "$newest" ]] && continue
+        while IFS= read -r dir; do
+            mtime=$(stat -f %m "$dir" 2>/dev/null) || continue
+            if (( mtime < newest - 600 )); then
+                size=$(du -sk "$dir" 2>/dev/null | cut -f1) || continue
+                [[ -n "$size" ]] || continue
+                rm -rf "$dir"
+                removed=$((removed + 1))
+                freed=$((freed + size))
+            fi
+        done < <(find "$cache" -mindepth 2 -maxdepth 2 -type d)
+    done < <(find "$data/Library/Caches" -maxdepth 2 -type d -name com.apple.e5rt.e5bundlecache 2>/dev/null)
+    if (( removed > 0 )); then
+        echo "  Removed $removed old compiled model copies ($((freed / 1024)) MB)."
+    fi
 }
 
 # ── Unified launch ──────────────────────────────────────────────────
@@ -99,13 +138,26 @@ _launch_app() {
             if ! xcrun simctl list devices booted | grep -q "$SIM_ID"; then
                 xcrun simctl boot "$SIM_ID"
             fi
+            _prune_model_cache
             _install_app
+            if [[ -n "${_SCRIPT_CONFIG_FILE:-}" ]]; then
+                local data_dir
+                data_dir=$(xcrun simctl get_app_container "$SIM_ID" "$BUNDLE_ID" data 2>/dev/null || true)
+                if [[ -n "$data_dir" ]]; then
+                    mkdir -p "$data_dir/Library/Caches"
+                    cp "$_SCRIPT_CONFIG_FILE" "$data_dir/Library/Caches/scriptor-config.json"
+                fi
+            fi
             # IOS_LAUNCH_ARGS adds launch arguments of the project's own
             # (e.g. one that starts the app muted) to every simulator launch.
             local extra=()
             read -r -a extra <<< "${IOS_LAUNCH_ARGS:-}"
-            xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" "$@" ${extra[@]+"${extra[@]}"} > /dev/null
-            if [[ "${_QUIET_INSTALL:-false}" != "true" ]]; then
+            # A script run starts a new process: one still running would
+            # keep the environment of the run before.
+            local fresh=()
+            [[ "${_LAUNCH_FRESH:-false}" == "true" ]] && fresh=(--terminate-running-process)
+            xcrun simctl launch ${fresh[@]+"${fresh[@]}"} "$SIM_ID" "$BUNDLE_ID" "$@" ${extra[@]+"${extra[@]}"} > /dev/null
+            if [[ "${_QUIET_INSTALL:-${IOS_QUIET:-false}}" != "true" ]]; then
                 _open_simulator_gui
             fi
             ;;
