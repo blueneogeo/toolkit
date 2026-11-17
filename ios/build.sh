@@ -1196,9 +1196,12 @@ _simulator_usage() {
     cat <<EOF
 Usage: ./build.sh ios simulator <command>
 
-  create <model>       Make a simulator of that model (e.g. "iPhone 13 mini") on the
-                       newest iOS runtime, unless one exists; prints its UDID. Use its
-                       name as the target of install, debug, screenshot and the like.
+  create <model> [name]
+                       Make a simulator of that model (e.g. "iPhone 13 mini") on the
+                       newest iOS runtime (SIM_OS_VERSION picks another), unless one of
+                       that name exists; prints its UDID. The name defaults to the
+                       model. Use it as the target of install, debug, screenshot and
+                       the like.
   front <simulator>    Bring the app back to the front on that simulator, as a tap on
                        its icon does: the running process carries on, nothing is
                        installed or restarted.
@@ -1253,15 +1256,15 @@ do_simulator() {
             ;;
         create)
             shift
-            local model="${1:-}"
+            local model="${1:-}" sim_name="${2:-${1:-}}"
             if [[ -z "$model" ]]; then
                 echo "✗ simulator create needs a model, e.g. \"iPhone 13 mini\""
                 return 1
             fi
             local existing
-            existing=$(xcrun simctl list devices available | grep -F "    $model (" | grep -oE '[A-F0-9-]{36}' | head -1 || true)
+            existing=$(xcrun simctl list devices available | grep -F "    $sim_name (" | grep -oE '[A-F0-9-]{36}' | head -1 || true)
             if [[ -n "$existing" ]]; then
-                echo "✓ $model exists"
+                echo "✓ $sim_name exists"
                 echo "$existing"
                 return 0
             fi
@@ -1271,16 +1274,18 @@ do_simulator() {
                 echo "✗ No simulator model called \"$model\". See: xcrun simctl list devicetypes"
                 return 1
             fi
-            runtime=$(xcrun simctl list runtimes available | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+' | tail -1 || true)
+            local version="[0-9-]+"
+            [[ -n "${SIM_OS_VERSION:-}" ]] && version="${SIM_OS_VERSION//./-}"
+            runtime=$(xcrun simctl list runtimes available | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-$version" | tail -1 || true)
             if [[ -z "$runtime" ]]; then
-                echo "✗ No iOS simulator runtime installed."
+                echo "✗ No iOS ${SIM_OS_VERSION:-} simulator runtime installed."
                 return 1
             fi
-            if ! udid=$(xcrun simctl create "$model" "$device_type" "$runtime" 2>&1); then
-                echo "✗ Could not make $model: $udid"
+            if ! udid=$(xcrun simctl create "$sim_name" "$device_type" "$runtime" 2>&1); then
+                echo "✗ Could not make $sim_name: $udid"
                 return 1
             fi
-            echo "✓ Made $model"
+            echo "✓ Made $sim_name ($model, ${runtime##*.})"
             echo "$udid"
             ;;
         text-size)
@@ -3377,7 +3382,7 @@ Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
     push <payload.json>
                        Deliver an APNs payload to the app on the booted simulator; it is
                        shown directly, without running a notification service extension
-    simulator <create <model>|front <sim>|contact <sim> <vcf>|text-size [size]>
+    simulator <create <model> [name]|front <sim>|contact <sim> <vcf>|text-size [size]>
                        Make a simulator of another model (e.g. "iPhone 13 mini"), bring
                        the app to the front, add contacts the app may read, or set the
                        booted simulator's text size (Dynamic Type).
