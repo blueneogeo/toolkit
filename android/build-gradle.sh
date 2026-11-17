@@ -3,7 +3,8 @@
 # Sourced by build.sh. Gradle runs through the project's ./gradlew with
 # JAVA_HOME set here, under the gradle lock (two builds at most).
 #
-# Provides: _resolve_java_home, _gradle_run, do_build, do_clean, do_test, do_lint, do_format
+# Provides: _resolve_java_home, _gradle_run, do_build, do_clean, do_test,
+#           do_test_instrumented, do_lint, do_format
 # Depends on: _build_config, _build_variant, ANDROID_MODULE (build.sh)
 # Depends on: _lock_take, _lock_release (build-lock.sh), _night_dir (build-overnight.sh)
 # Depends on: _parity_gate (build-sync.sh)
@@ -240,7 +241,7 @@ import glob, os, sys
 import xml.etree.ElementTree as ET
 total = failed = skipped = 0
 failures = []
-for path in sorted(glob.glob(os.path.join(os.environ["DIR"], "TEST-*.xml"))):
+for path in sorted(glob.glob(os.path.join(os.environ["DIR"], "**", "TEST-*.xml"), recursive=True)):
     suite = ET.parse(path).getroot()
     for case in suite.iter("testcase"):
         total += 1
@@ -267,49 +268,58 @@ print("✓ %d tests passed%s" % (total - skipped, extra))
 '
 }
 
-do_test() {
-    _gradle_require || return 1
-    local variant
-    variant=$(_build_variant)
-    echo "Testing $ANDROID_APP_NAME (unit tests, $(_build_config))."
-    if [[ "${TOOLKIT_SERVER_ENABLED:-false}" == "true" ]]; then
-        _require_server
-    fi
-
-    local test_filter="" test_timeout=$TEST_TIMEOUT arg
+# Parses [filter] [timeout] [--no-build|--build-only] into _TEST_FILTER,
+# _TEST_TIMEOUT and _TEST_BUILD_ONLY.
+_test_args() {
+    _TEST_FILTER=""
+    _TEST_TIMEOUT=$TEST_TIMEOUT
+    _TEST_BUILD_ONLY=false
+    local arg
     for arg in "$@"; do
         if [[ "$arg" =~ ^[0-9]+$ ]]; then
-            test_timeout="$arg"
+            _TEST_TIMEOUT="$arg"
         elif [[ "$arg" == "--no-build" ]]; then
             :
+        elif [[ "$arg" == "--build-only" ]]; then
+            _TEST_BUILD_ONLY=true
+        elif [[ "$arg" == -* ]]; then
+            echo "✗ Unknown flag: $arg"
+            return 1
         else
-            test_filter="$arg"
+            _TEST_FILTER="$arg"
         fi
     done
+}
 
-    local task=":$ANDROID_MODULE:test${variant}UnitTest"
-    local args=("$task" --rerun)
-    if [[ -n "$test_filter" ]]; then
-        local pattern="${test_filter//\//.}"
-        [[ "$pattern" == *"*"* || "$pattern" == *.*.* ]] || pattern="*.$pattern"
-        args+=(--tests "$pattern")
-        echo "  Running tests filtered by '$test_filter' (timeout: ${test_timeout}s)..."
+# Compiles the tests without running them, and without the local server.
+_test_build_only() {
+    local name="$1" task="$2"
+    echo "  Building tests..."
+    if _gradle_run "$name" "$task"; then
+        echo "✓ Tests build"
     else
-        echo "  Running tests... (timeout: ${test_timeout}s)"
-    fi
-
-    local results="$PROJECT_ROOT/$ANDROID_MODULE/build/test-results/test${variant}UnitTest"
-    rm -rf "$results"
-    local rc=0
-    _run_tests_with_timeout "$test_timeout" "${args[@]}" || rc=$?
-    if [[ $rc -eq 124 ]]; then
-        if ls "$results"/TEST-*.xml >/dev/null 2>&1; then
-            _test_summary "$results" || true
-        fi
-        echo "✗ Tests timed out after ${test_timeout}s"
+        echo "✗ Tests don't build:"
+        _gradle_failure "$(_gradle_log "$name")"
         return 1
     fi
-    if [[ -d "$results" ]] && ls "$results"/TEST-*.xml >/dev/null 2>&1; then
+}
+
+# Runs the Gradle test task, then prints the verdict from the JUnit reports in
+# the results folder.
+_run_test_task() {
+    local results="$1" timeout="$2"
+    shift 2
+    rm -rf "$results"
+    local rc=0
+    _run_tests_with_timeout "$timeout" "$@" || rc=$?
+    if [[ $rc -eq 124 ]]; then
+        if [[ -n "$(_test_reports "$results")" ]]; then
+            _test_summary "$results" || true
+        fi
+        echo "✗ Tests timed out after ${timeout}s"
+        return 1
+    fi
+    if [[ -n "$(_test_reports "$results")" ]]; then
         _test_summary "$results" || return 1
         [[ $rc -eq 0 ]] && return 0
     fi
@@ -318,4 +328,90 @@ do_test() {
         _gradle_failure "$(_gradle_log test)"
         return 1
     fi
+}
+
+_test_reports() {
+    find "$1" -name 'TEST-*.xml' 2>/dev/null | head -1
+}
+
+do_test() {
+    if [[ "${1:-}" == "instrumented" ]]; then
+        shift
+        do_test_instrumented "$@"
+        return
+    fi
+    _gradle_require || return 1
+    _test_args "$@" || return 1
+    local variant
+    variant=$(_build_variant)
+    echo "Testing $ANDROID_APP_NAME (unit tests, $(_build_config))."
+    if $_TEST_BUILD_ONLY; then
+        _test_build_only test ":$ANDROID_MODULE:compile${variant}UnitTestKotlin"
+        return
+    fi
+    if [[ "${TOOLKIT_SERVER_ENABLED:-false}" == "true" ]]; then
+        _require_server
+    fi
+
+    local task=":$ANDROID_MODULE:test${variant}UnitTest"
+    local args=("$task" --rerun)
+    if [[ -n "$_TEST_FILTER" ]]; then
+        local pattern="${_TEST_FILTER//\//.}"
+        [[ "$pattern" == *"*"* || "$pattern" == *.*.* ]] || pattern="*.$pattern"
+        args+=(--tests "$pattern")
+        echo "  Running tests filtered by '$_TEST_FILTER' (timeout: ${_TEST_TIMEOUT}s)..."
+    else
+        echo "  Running tests... (timeout: ${_TEST_TIMEOUT}s)"
+    fi
+    _run_test_task "$PROJECT_ROOT/$ANDROID_MODULE/build/test-results/test${variant}UnitTest" "$_TEST_TIMEOUT" "${args[@]}"
+}
+
+# The fully qualified name of a test class under src/androidTest, for the
+# runner's class argument. A dotted name is taken as it is.
+_instrumented_class() {
+    local name="$1" file package
+    if [[ "$name" == *.* ]]; then
+        echo "$name"
+        return 0
+    fi
+    file=$(grep -rlE "^(internal |open |abstract )*class $name\b" "$PROJECT_ROOT/$ANDROID_MODULE/src/androidTest" 2>/dev/null | head -1 || true)
+    if [[ -z "$file" ]]; then
+        echo "✗ No test class $name under $ANDROID_MODULE/src/androidTest." >&2
+        return 1
+    fi
+    package=$(sed -n 's/^package \([A-Za-z0-9_.]*\).*/\1/p' "$file" | head -1)
+    echo "${package:+$package.}$name"
+}
+
+# test instrumented [filter] [timeout] [--no-build|--build-only]: the tests
+# under src/androidTest, on the emulator or a phone (the target of
+# --device or ANDROID_DEVICE, else the running emulator, else the one phone).
+do_test_instrumented() {
+    _gradle_require || return 1
+    _test_args "$@" || return 1
+    local variant
+    variant=$(_build_variant)
+    echo "Testing $ANDROID_APP_NAME (instrumented tests, $(_build_config))."
+    if $_TEST_BUILD_ONLY; then
+        _test_build_only test ":$ANDROID_MODULE:assemble${variant}AndroidTest"
+        return
+    fi
+    if [[ "${TOOLKIT_SERVER_ENABLED:-false}" == "true" ]]; then
+        _require_server
+    fi
+    local args=(":$ANDROID_MODULE:connected${variant}AndroidTest")
+    if [[ -n "$_TEST_FILTER" ]]; then
+        local class method=""
+        class="${_TEST_FILTER%%/*}"
+        [[ "$_TEST_FILTER" == */* ]] && method="#${_TEST_FILTER#*/}"
+        class=$(_instrumented_class "$class") || return 1
+        args+=("-Pandroid.testInstrumentationRunnerArguments.class=$class$method")
+        echo "  Running tests filtered by '$_TEST_FILTER' (timeout: ${_TEST_TIMEOUT}s)..."
+    else
+        echo "  Running tests... (timeout: ${_TEST_TIMEOUT}s)"
+    fi
+    _lock_take emulator || return 1
+    _use_target "" || return 1
+    echo "  On $(_target_label)"
+    ANDROID_SERIAL="$SERIAL" _run_test_task "$PROJECT_ROOT/$ANDROID_MODULE/build/outputs/androidTest-results/connected" "$_TEST_TIMEOUT" "${args[@]}"
 }

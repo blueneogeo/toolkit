@@ -47,28 +47,60 @@ _android_logs() {
         target="$1"
         shift
     fi
-    _select_android_target "$target" || return 1
-    local cat_filter="" level_filter="" cmd=""
+    local cat_filter="" level_filter="" process="" minutes=15 cmd=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --cat) cat_filter="${2:-}"; shift 2 ;;
-            --level) level_filter="${2:-}"; shift 2 ;;
+            --cat | --level | --process | --minutes)
+                if [[ $# -lt 2 || "$2" == --* ]]; then
+                    echo "✗ $1 needs a value."
+                    return 1
+                fi
+                case "$1" in
+                    --cat) cat_filter="$2" ;;
+                    --level) level_filter="$2" ;;
+                    --process) process="$2" ;;
+                    --minutes) minutes="$2" ;;
+                esac
+                shift 2
+                ;;
             *) cmd="$1"; shift ;;
         esac
     done
-    [[ -z "$cmd" ]] && cmd=10
+    if ! [[ "$minutes" =~ ^[1-9][0-9]*$ ]]; then
+        echo "✗ --minutes takes a whole number of minutes, from 1."
+        return 1
+    fi
+    if [[ "$cmd" == "tail" && ( -n "$process" || "$minutes" != 15 ) ]]; then
+        echo "✗ tail follows the app's own lines; --process and --minutes are for the last N lines."
+        return 1
+    fi
+    _select_android_target "$target" || return 1
 
-    local source_args=(-s "$ANDROID_LOG_TAG:V")
-    if [[ "$cat_filter" == "all" ]]; then
-        local app_id pid
-        app_id=$(_app_id) || return 1
-        pid=$(_app_pid "$app_id")
+    # The app's own tag; --cat all, every line of the app's process;
+    # --process <name>, every line of that process; --process all, every line.
+    local source_args=(-s "$ANDROID_LOG_TAG:V") source_name="app logs"
+    if [[ "$process" == "all" ]]; then
+        source_args=("*:V")
+        source_name="logs of all"
+        cat_filter="${cat_filter#all}"
+    elif [[ -n "$process" || "$cat_filter" == "all" ]]; then
+        local name="$process" pid
+        if [[ -z "$name" ]]; then
+            name=$(_app_id) || return 1
+        else
+            source_name="logs of $process"
+        fi
+        pid=$("$ADB" -s "$SERIAL" shell pidof "$name" 2>/dev/null | tr -d '\r' | awk '{ print $1 }' || true)
         if [[ -z "$pid" ]]; then
-            echo "✗ $app_id is not running; --cat all reads the running app's process."
+            if [[ -z "$process" ]]; then
+                echo "✗ $name is not running; --cat all reads the running app's process."
+            else
+                echo "✗ No process called $process is running."
+            fi
             return 1
         fi
-        source_args=("--pid=$pid")
-        cat_filter=""
+        source_args=("--pid=$pid" "*:V")
+        [[ "$cat_filter" == "all" ]] && cat_filter=""
     fi
 
     if [[ "$cmd" == "tail" ]]; then
@@ -91,14 +123,24 @@ _android_logs() {
     local lines="$cmd"
     [[ "$lines" =~ ^[0-9]+$ ]] || lines=10
     if [[ -n "$cat_filter" ]]; then
-        echo "→ Last $lines app logs (filter: $cat_filter):"
+        echo "→ Last $lines ${source_name} (filter: $cat_filter):"
     else
-        echo "→ Last $lines app logs:"
+        echo "→ Last $lines ${source_name}:"
     fi
-    "$ADB" -s "$SERIAL" logcat -d -v time "${source_args[@]}" 2>/dev/null | tr -d '\r' \
+    local since
+    since=$(_device_minutes_ago "$minutes")
+    "$ADB" -s "$SERIAL" logcat -d -v time ${since:+-T "$since"} "${source_args[@]}" 2>/dev/null | tr -d '\r' \
         | { grep -v '^--------- beginning of' || true; } \
         | { if [[ -n "$cat_filter" ]]; then grep -F "[${cat_filter}]" || true; else cat; fi; } \
         | _logcat_format "$ANDROID_LOG_TAG" | _level_grep "$level_filter" | tail -n "$lines"
+}
+
+# The device's clock M minutes ago, in logcat's -T format; nothing when the
+# device's date can't count back.
+_device_minutes_ago() {
+    local minutes="$1"
+    "$ADB" -s "$SERIAL" shell "date -d @\$((\$(date +%s) - $minutes * 60)) '+%m-%d %H:%M:%S.000'" 2>/dev/null | tr -d '\r' \
+        | grep -E '^[0-9]{2}-[0-9]{2} [0-9:.]+$' || true
 }
 
 # The device's clock in logcat's -T format.

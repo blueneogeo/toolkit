@@ -4,7 +4,7 @@
 #
 # Provides: _find_apk, _app_id, _app_running, _terminate_app, _install_app,
 #           _launch_app, _am_start, _reverse_server_port, _use_target,
-#           do_install, do_launch, do_uninstall
+#           _install_without_launch, do_install, do_launch, do_uninstall
 # Depends on: SERIAL, _select_android_target, _target_label (build-device.sh)
 # Depends on: do_emulator (build-emulator.sh), do_build (build-gradle.sh)
 # Depends on: _lock_take (build-lock.sh)
@@ -198,17 +198,44 @@ _launch_with_fixture() {
 
 do_install() {
     _take_fixture_arg "$@"
-    local target="" arg
+    local target="" no_launch=false arg
     for arg in ${_REST_ARGS[@]+"${_REST_ARGS[@]}"}; do
         case "$arg" in
             --quiet|-q) ;;
+            # The next launch is the first after the install, as after an
+            # update from Play: for profiling it.
+            --no-launch) no_launch=true ;;
+            -*) echo "✗ Unknown flag: $arg"; return 1 ;;
             *) target="$arg" ;;
         esac
     done
+    if $no_launch && [[ -n "$_FIXTURE_SLOT" ]]; then
+        echo "✗ --fixture seeds a launch; --no-launch has none."
+        return 1
+    fi
     do_build || return 1
     _lock_take emulator || return 1
     _use_target "$target" || return 1
+    if $no_launch; then
+        _install_without_launch
+        return
+    fi
     _launch_with_fixture
+}
+
+# Installs the built APK and compiles it the way Play leaves an app after an
+# install or update (the speed-profile dexopt), without starting it.
+_install_without_launch() {
+    local app_id
+    app_id=$(_app_id) || return 1
+    _install_app || return 1
+    _reverse_server_port
+    local out
+    out=$("$ADB" -s "$SERIAL" shell cmd package compile -m speed-profile -f "$app_id" 2>&1 | tr -d '\r' || true)
+    if ! grep -q Success <<<"$out"; then
+        echo "⚠ The speed-profile compile failed; the first launch runs less optimised code than after a Play install."
+    fi
+    echo "✓ Installed, not launched"
 }
 
 do_launch() {
