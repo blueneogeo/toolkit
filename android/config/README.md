@@ -101,7 +101,7 @@ Gradle's output goes to `build/logs/gradle-<command>.log`. On failure the toolki
 | `uninstall [target]` | Stops the watcher and the app and uninstalls it. Unlike iOS, which shuts the simulator down, the emulator keeps running: other work shares it. |
 | `logs [target] [--cat <cat>] [--level <level>] [N\|tail]` | The app's log lines (tag `ANDROID_LOG_TAG`) as `HH:MM:SS.mmm  LEVEL [cat] msg`. `--cat all` shows every line of the running app's process. `tail` streams new lines. |
 | `debug [target] [--cat] [--level] [--script <names>] [--no-build] [--timeout N] [--fixture [slot]]` | Below. |
-| `signin [email code]` / `signout` | `debug emulator --no-build --script sign_in` or `sign_out`. The login comes from `SCRIPT_ENV_TURN_LOGIN_EMAIL` and `_CODE`, or the two arguments. |
+| `signin [target] [email code]` / `signout [target]` | `debug <target> --no-build --script sign_in` or `sign_out`; the target defaults to `emulator`. The login comes from `SCRIPT_ENV_TURN_LOGIN_EMAIL` and `_CODE`, or the two arguments. |
 
 `--fixture [slot]` (slot from `AGENT_SLOT`, else 1) runs `./build.sh fixture session <slot>` first, because a refresh token works once, then passes `FIXTURE_SLOT_<slot>_REFRESH_TOKEN` and `FIXTURE_SLOT_<slot>_CLOCK` from `build.properties.local` as the extras `TURN_DEBUG_REFRESH_TOKEN` and `TURN_CLOCK`.
 
@@ -111,9 +111,10 @@ Gradle's output goes to `build/logs/gradle-<command>.log`. On failure the toolki
 2. With `--script`: clears `cache/scriptor-ready` with `run-as` and passes `TURN_DEBUG_SCRIPT_NAMES`, every `SCRIPT_ENV_<NAME>` and the `signin` login as extras. Builds that aren't debuggable (`--config profile`) get `TURN_DEBUG_SCRIPT_NO_MARKER=1` instead of the marker.
 3. Notes the device's time, streams `logcat -T <that time>` so nothing logged during launch is lost, and launches with `am start -W -S`.
 4. One second later, writes the marker with `run-as`.
-5. Shows the app's lines, filtered by `--cat` and `--level`, until `DEBUG_SESSION_ENDED` (`✓ App backgrounded, session ended.`) or the app's process ends (`✓ App stopped, session ended.`).
+5. Shows the app's lines, filtered by `--cat` and `--level`, until `DEBUG_SESSION_ENDED` (`✓ App backgrounded, session ended.`) or the process it launched ends (`✓ App stopped, session ended.`).
+6. After a script run, prints each script's `SCRIPT_RESULT` line (`lens_check: 4 passed, 0 failed`), then `✓ Every check passed.`, or `✗ <n> check(s) failed:` with each failed check, or `✗ The app stopped before its scripts ended.` The last two exit 1. The summary functions are `_note_script_line` and `_script_summary` in `toolkit/shared/scripts.sh`, the same as iOS.
 
-A scripted run fails when no `[scriptor]` line arrives within 40 s (the build has no script runner), or after `--timeout` seconds (default 600) without `DEBUG_SESSION_ENDED`.
+The target and the flags come in any order. A second target or an unknown flag stops the run. A scripted run also fails when no `[scriptor]` line arrives within 40 s (the build has no script runner), or after `--timeout` seconds (default 600) without `DEBUG_SESSION_ENDED`; a timeout prints the results the scripts logged so far.
 
 ### Screen
 

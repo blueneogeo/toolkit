@@ -2987,36 +2987,6 @@ _write_scriptor_marker() {
     esac
 }
 
-# Scripts report each failed check as a CHECK_FAILED line and end with
-# "DEBUG_SESSION_ENDED failed=<n>". Keeps those lines for the summary.
-_note_script_line() {
-    local line="$1" results="$2"
-    case "$line" in
-        *CHECK_FAILED*|*SCRIPT_RESULT*|*DEBUG_SESSION_ENDED*)
-            echo "$line" | _compact_log_format >> "$results"
-            ;;
-    esac
-}
-
-# The summary of a script run, and whether every check passed.
-_script_summary() {
-    local results="$1"
-    echo ""
-    if ! grep -q "DEBUG_SESSION_ENDED" "$results" 2>/dev/null; then
-        echo "✗ The app stopped before its scripts ended."
-        return 1
-    fi
-    grep "SCRIPT_RESULT" "$results" | sed -E 's/.*SCRIPT_RESULT /  /'
-    local failed
-    failed=$(grep "DEBUG_SESSION_ENDED" "$results" | sed -nE 's/.*failed=([0-9]+).*/\1/p' | tail -1)
-    if [[ "${failed:-0}" -gt 0 ]]; then
-        echo "✗ $failed check(s) failed:"
-        grep "CHECK_FAILED" "$results" | sed -E 's/.*CHECK_FAILED /  /'
-        return 1
-    fi
-    echo "✓ Every check passed."
-}
-
 # The process id of the app running on the simulator, or nothing.
 _sim_app_pid() {
     xcrun simctl spawn "$SIM_ID" launchctl list 2>/dev/null \
@@ -3181,7 +3151,7 @@ EOF
                                 echo "$formatted"
                             fi
                         fi
-                        _note_script_line "$line" "$results"
+                        _note_script_line "$line" "$results" _compact_log_format
                         if [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
                             break
                         fi
@@ -3254,7 +3224,7 @@ EOF
                 disown "$watch_pid"
             fi
             while IFS= read -r line; do
-                _note_script_line "$line" "$results"
+                _note_script_line "$line" "$results" _compact_log_format
                 local show=false
                 if [[ "$cat_filter" == "all" ]]; then
                     show=true

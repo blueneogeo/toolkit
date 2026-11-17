@@ -119,10 +119,15 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
     logs [target] [--cat <cat>] [--level <level>] tail Stream the app's logs
     debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build] [--timeout N]
                        Build (or with --no-build, just relaunch), launch, and trace logs
-                       (stops when the app goes to the background or a script run ends)
-    signin [email code]  Sign the emulator in with SCRIPT_ENV_TURN_LOGIN_EMAIL / _CODE from
-                       build.properties.local, or with the given login (runs sign_in)
-    signout            Sign the emulator out (runs the sign_out script)
+                       (stops when the app goes to the background or a script run ends).
+                       A script run prints each script's result and the failed checks,
+                       and exits 1 when a check failed or the app stopped first
+    signin [emulator|device|<serial|avd name>] [email code]
+                       Sign the emulator in with SCRIPT_ENV_TURN_LOGIN_EMAIL / _CODE from
+                       build.properties.local, or with the given account and its fixed code
+                       (runs the sign_in debug script, no rebuild)
+    signout [emulator|device|<serial|avd name>]
+                       Sign the emulator out (runs the sign_out debug script)
 
   Screen:
     emulator <start|stop|status>
@@ -238,15 +243,8 @@ _dispatch() {
         doctor)      shift; do_doctor "$@" ;;
         logs)        shift; _android_logs "$@" ;;
         debug)       shift; _android_debug "$@" ;;
-        signin)
-            shift
-            if [[ $# -ge 2 ]]; then
-                _SIGNIN_EMAIL="$1"
-                _SIGNIN_CODE="$2"
-            fi
-            _android_debug emulator --no-build --script sign_in
-            ;;
-        signout)     _android_debug emulator --no-build --script sign_out ;;
+        signin)      shift; _sign_in_or_out sign_in "$@" ;;
+        signout)     shift; _sign_in_or_out sign_out "$@" ;;
         emulator)
             shift
             case "${1:-}" in

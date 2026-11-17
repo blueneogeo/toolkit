@@ -4,11 +4,12 @@
 # "<LEVEL> [<cat>] <msg>"; logcat lines are shown as
 # "HH:MM:SS.mmm  LEVEL [cat] msg", the same as on iOS.
 #
-# Provides: _android_logs, _android_debug
+# Provides: _android_logs, _android_debug, _sign_in_or_out
 # Depends on: _use_target, _app_id, _app_pid, _install_app, _am_start,
 #             _reverse_server_port, _find_apk (build-lifecycle.sh)
 # Depends on: do_build (build-gradle.sh), _lock_take (build-lock.sh)
-# Depends on: _level_grep (shared/logfmt.sh), _sanitize_script_names (shared/scripts.sh)
+# Depends on: _level_grep (shared/logfmt.sh), _sanitize_script_names,
+#             _note_script_line, _script_summary (shared/scripts.sh)
 
 DEBUG_MARKER_NAME="${DEBUG_MARKER_NAME:-scriptor-ready}"
 DEBUG_RUNNER_WAIT=40
@@ -172,13 +173,10 @@ _android_debug() {
         echo "✗ Logs disabled. Set TOOLKIT_LOGS_ENABLED=true in build.properties."
         return 1
     fi
-    local target=""
-    if [[ -n "${1:-}" && "$1" != --* ]]; then
-        target="$1"
-        shift
-    fi
-    local cat_filter="" level_filter="" script_names="" no_build=false timeout="" fixture=""
-    while [[ "${1:-}" == --* ]]; do
+    # The target and the flags come in any order; a second target or an
+    # unknown flag stops the run, so it never falls back to another device.
+    local target="" cat_filter="" level_filter="" script_names="" no_build=false timeout="" fixture=""
+    while [[ $# -gt 0 ]]; do
         case "$1" in
             --fixture)
                 fixture="${AGENT_SLOT:-1}"
@@ -188,12 +186,30 @@ _android_debug() {
                 fi
                 shift
                 ;;
-            --cat) cat_filter="${2:-}"; shift 2 ;;
-            --level) level_filter="${2:-}"; shift 2 ;;
-            --script) script_names="${2:-}"; shift 2 ;;
+            --cat | --level | --script | --timeout)
+                if [[ $# -lt 2 || "$2" == --* ]]; then
+                    echo "✗ $1 needs a value."
+                    return 1
+                fi
+                case "$1" in
+                    --cat) cat_filter="$2" ;;
+                    --level) level_filter="$2" ;;
+                    --script) script_names="$2" ;;
+                    --timeout) timeout="$2" ;;
+                esac
+                shift 2
+                ;;
             --no-build) no_build=true; shift ;;
-            --timeout) timeout="${2:-}"; shift 2 ;;
-            *) echo "⚠ Unknown flag: $1" >&2; shift ;;
+            --quiet|-q) shift ;;
+            -*) echo "✗ Unknown flag: $1" >&2; return 1 ;;
+            *)
+                if [[ -n "$target" ]]; then
+                    echo "✗ Two targets: $target and $1" >&2
+                    return 1
+                fi
+                target="$1"
+                shift
+                ;;
         esac
     done
     if [[ -n "$timeout" && ! "$timeout" =~ ^[0-9]+$ ]]; then
@@ -268,9 +284,31 @@ _android_debug() {
     fi
     echo ""
 
-    $use_marker && ( sleep 1; _write_scriptor_marker "$app_id" ) &
+    $use_marker && ( sleep 1; _write_scriptor_marker "$app_id" ) >/dev/null 2>&1 &
 
-    local started=$SECONDS heard_runner=false ended=false outcome="ended" line formatted
+    local results
+    results=$(mktemp)
+    _debug_follow "$app_id" "$pid" "$cat_filter" "$level_filter" "$script_names" "$timeout" "$results" < "$fifo"
+    kill "$logcat_pid" 2>/dev/null || true
+    { wait "$logcat_pid"; } 2>/dev/null || true
+    rm -f "$fifo"
+
+    local code=0
+    _debug_outcome "$script_names" "$timeout" "$results" || code=$?
+    rm -f "$results"
+    return "$code"
+}
+
+# Reads logcat -v time lines from stdin and shows the app's own, filtered by
+# --cat and --level, keeping the script lines in the results file. Stops on
+# DEBUG_SESSION_ENDED, when the launched process is gone, when the stream
+# ends, without a [scriptor] line in DEBUG_RUNNER_WAIT seconds of a scripted
+# run, or at the timeout. Sets _DEBUG_OUTCOME: ended, stopped, no-runner or
+# timeout.
+_debug_follow() {
+    local app_id="$1" pid="$2" cat_filter="$3" level_filter="$4" script_names="$5" timeout="$6" results="$7"
+    local started=$SECONDS heard_runner=false line formatted status
+    _DEBUG_OUTCOME="stopped"
     while true; do
         if IFS= read -r -t 2 line; then
             line="${line%$'\r'}"
@@ -283,6 +321,7 @@ _android_debug() {
                 continue
             fi
             [[ "$line" == *"[scriptor]"* ]] && heard_runner=true
+            $own && _note_script_line "$line" "$results" _logcat_format_own
             local show=false
             if [[ "$cat_filter" == "all" || -z "$cat_filter" ]]; then
                 show=true
@@ -295,41 +334,72 @@ _android_debug() {
                 _level_keep "$level_filter" "$formatted" && echo "$formatted"
             fi
             if [[ "$line" == *"DEBUG_SESSION_ENDED"* ]]; then
-                ended=true
+                _DEBUG_OUTCOME="ended"
                 break
             fi
         else
-            if [[ -n "$pid" ]] && ! _app_running "$app_id"; then
+            status=$?
+            # Not a timeout: the stream ended.
+            (( status <= 128 )) && break
+            if [[ -n "$pid" ]] && [[ "$(_app_pid "$app_id")" != "$pid" ]]; then
                 break
             fi
         fi
         if [[ -n "$script_names" ]] && ! $heard_runner && (( SECONDS - started >= DEBUG_RUNNER_WAIT )); then
-            outcome="no-runner"
+            _DEBUG_OUTCOME="no-runner"
             break
         fi
         if [[ -n "$timeout" ]] && (( SECONDS - started >= timeout )); then
-            outcome="timeout"
+            _DEBUG_OUTCOME="timeout"
             break
         fi
-    done < "$fifo"
-    kill "$logcat_pid" 2>/dev/null || true
-    { wait "$logcat_pid"; } 2>/dev/null || true
-    rm -f "$fifo"
+    done
+    return 0
+}
 
+_logcat_format_own() {
+    _logcat_format "$ANDROID_LOG_TAG"
+}
+
+# Prints how the session ended and, for a script run, each script's result
+# and the failed checks. Fails when a check failed, the app stopped before
+# its scripts ended, no runner answered, or the run timed out.
+_debug_outcome() {
+    local script_names="$1" timeout="$2" results="$3"
     echo ""
-    case "$outcome" in
+    case "$_DEBUG_OUTCOME" in
         no-runner)
             echo "✗ No [scriptor] line in ${DEBUG_RUNNER_WAIT}s: this build has no script runner, or it did not start."
             return 1
             ;;
         timeout)
             echo "✗ Session timed out after ${timeout}s without DEBUG_SESSION_ENDED."
+            # What the scripts reported before the time ran out.
+            grep -E "SCRIPT_RESULT|CHECK_FAILED" "$results" | sed -E 's/.*(SCRIPT_RESULT|CHECK_FAILED) /  /' || true
             return 1
             ;;
+        ended) echo "✓ App backgrounded, session ended." ;;
+        *) echo "✓ App stopped, session ended." ;;
     esac
-    if $ended; then
-        echo "✓ App backgrounded, session ended."
-    else
-        echo "✓ App stopped, session ended."
+    if [[ -n "$script_names" ]]; then
+        _script_summary "$results" || return 1
     fi
+    return 0
+}
+
+# signin|signout [emulator|device|<serial|avd name>] [email code]: runs the
+# project's sign_in or sign_out debug script without rebuilding. Another
+# account than build.properties.local's comes as <email> <code>.
+_sign_in_or_out() {
+    local script="$1" target="emulator"
+    shift
+    if [[ $# -gt 0 && "$1" != *@* ]]; then
+        target="$1"
+        shift
+    fi
+    if [[ "$script" == "sign_in" && $# -ge 2 ]]; then
+        _SIGNIN_EMAIL="$1"
+        _SIGNIN_CODE="$2"
+    fi
+    _android_debug "$target" --no-build --script "$script"
 }
