@@ -9,6 +9,26 @@
 # Depends on: _lock_take, _lock_release (build-lock.sh), _night_dir (build-overnight.sh)
 # Depends on: _parity_gate (build-sync.sh)
 
+TOKENS_PY="$SCRIPT_DIR/../shared/tokens.py"
+
+# The look tokens against the iOS sources they were read from, at the TOML's
+# ios_commit in TURN_ROOT. Skipped when no token folder exists.
+_tokens_gate() {
+    local dirs=() dir
+    for dir in ${TOOLKIT_TOKENS_DIRS:-${TURN_ROOT:+$TURN_ROOT/shared/tokens} $PROJECT_ROOT/shared-pending/tokens}; do
+        [[ -d "$dir" ]] && dirs+=(--tokens "$dir")
+    done
+    if [[ ${#dirs[@]} -eq 0 ]]; then
+        return 0
+    fi
+    if [[ -z "${TURN_ROOT:-}" ]]; then
+        echo "⚠ TURN_ROOT is not set; token gate skipped"
+        return 0
+    fi
+    echo "→ Token gate"
+    python3 -B "$TOKENS_PY" "${dirs[@]}" --ios-gate "$TURN_ROOT"
+}
+
 # Prints the JDK's major version (17, 21, ...) from its release file.
 _java_major() {
     local home="$1" version
@@ -129,6 +149,7 @@ _lint_fast() {
         do_android_arch_checks || return 1
     fi
     if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
+        _tokens_gate || return 1
         _parity_gate || return 1
     fi
     echo "✓ Lint passed"
