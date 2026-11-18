@@ -52,6 +52,7 @@ class Config:
     android_debug_tools: str = ""
     android_debug: str = "debug"
     android_tests: str = ""
+    android_instrumented_tests: str = ""
     shared: list = field(default_factory=list)
     strict: list = field(default_factory=list)
     component: list = field(default_factory=list)
@@ -119,10 +120,21 @@ class Config:
             rel = ios_path[len(self.ios_tests) + 1:]
             # A test file whose classes Android keeps in several files: [[split]] with the iOS path in full.
             if ios_path in self.splits:
-                return [os.path.join(self.android_tests, name) for name in self.splits[ios_path]]
-            folder, name = os.path.split(rel)
-            return [os.path.join(self.android_tests, folder.lower(), name[: -len(".swift")] + ".kt")]
+                names = self.splits[ios_path]
+            else:
+                folder, name = os.path.split(rel)
+                names = [os.path.join(folder.lower(), name[: -len(".swift")] + ".kt")]
+            return [self._android_test_path(name) for name in names]
         return []
+
+    def _android_test_path(self, name):
+        """A test runs on the JVM or on a phone: the instrumented tests' file when only it exists, else the JVM one."""
+        unit = os.path.join(self.android_tests, name)
+        if self.android_instrumented_tests and not os.path.exists(os.path.join(self.project_root, unit)):
+            instrumented = os.path.join(self.android_instrumented_tests, name)
+            if os.path.exists(os.path.join(self.project_root, instrumented)):
+                return instrumented
+        return unit
 
     def _android_path(self, name):
         if name.startswith("debugTools:"):
@@ -205,6 +217,7 @@ def load(project_root, turn_root, path=None):
     config.android_debug_tools = source.get("android_debug_tools", "")
     config.android_debug = source.get("android_debug", config.android_debug)
     config.android_tests = source.get("android_tests", "")
+    config.android_instrumented_tests = source.get("android_instrumented_tests", "")
     config.shared = source.get("shared", [])
     config.ledger_dir = source.get("ledger", config.ledger_dir)
     config.strict = tiers.get("strict", ["model/**", "service/**"])
