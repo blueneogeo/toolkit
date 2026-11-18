@@ -63,5 +63,13 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual((score["filtered_words"], score["shown_words"]), (0, 2))
 
 
+class LabelTests(unittest.TestCase):
+    def test_each_run_is_named_by_its_engine(self):
+        results = {"platform": "android", "engine": "whispercpp/large-v3-turbo-q5_0", "device": {"model": "Pixel 10"}}
+        self.assertEqual(bench.label(results, {"engine": "google-speech/on-device", "variant": "app"}), "android Pixel 10 google-speech app")
+        self.assertEqual(bench.label(results, {"variant": "none"}), "android Pixel 10 whispercpp none")
+        self.assertEqual(bench.label({"platform": "ios", "device": {"model": "iPhone"}}, {"variant": "app"}), "ios iPhone app")
+
+
 if __name__ == "__main__":
     unittest.main()
