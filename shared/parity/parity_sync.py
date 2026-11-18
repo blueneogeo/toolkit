@@ -378,6 +378,8 @@ def do_status(ctx, to=None, verbose=False):
                     print(f"      {line}")
             for text in moves.get(key, []):
                 print(f"      {text}")
+    if skipped or deferred:
+        print("\nNot ported (moves forward with the marker)")
     for unit, unit_changes in skipped:
         print(f"  skipped (iOS-only: {unit.note or 'parity.toml'}) {unit.key}")
     for unit, unit_changes in deferred:
@@ -387,8 +389,14 @@ def do_status(ctx, to=None, verbose=False):
         for unit in edited:
             print(f"  {unit.key}")
 
+    unfinished = sum(1 for unit in ledger.units.values() if unit.status in ("todo", "stub", "partial"))
     if pending == 0:
         print(f"\n✓ Nothing pending: Android is in sync with iOS {short(target)}")
+        if unfinished:
+            print(f"  ({unfinished} unit(s) are still todo, stub or partial in the ledger; status lists iOS changes, "
+                  "not unported units)")
+        if marker != target:
+            print(f"  Move the marker: ./build.sh sync mark --commit --to {short(target)}")
         return 0
     print(f"\n{pending} unit(s) pending against iOS {short(target)}")
     return 1
@@ -700,6 +708,14 @@ def do_mark_commit(ctx, to=None):
         print(f"✗ {len(pending)} unit(s) still pending against iOS {short(target)}; the marker stays at "
               f"{short(ledger.marker.ios_commit)}")
         return 1
+    shared_changes = shared_status(ctx, ledger, target)
+    if ledger.marker.ios_commit == target and not shared_changes:
+        print(f"✓ The marker is already at iOS {short(target)}; nothing to move")
+        return 0
+    if shared_changes:
+        print("Shared files taken with the marker (both apps read them; check the flags):")
+    for line in shared_changes:
+        print("  " + line)
     for key, unit in ledger.units.items():
         if unit.status in ("ios-only", "deferred") and key in current and unit.ios != current[key]:
             unit.ios = dict(current[key])
