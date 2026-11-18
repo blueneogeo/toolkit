@@ -261,6 +261,18 @@ _fixture_clear_stale_app() {
     fi
     _run_as "$app_id" "mkdir -p files && echo $(_device_quote "$wanted") > $FIXTURE_STAMP_FILE" \
         || echo "⚠ Could not write the fixture stamp with run-as."
+    _fixture_grant_permissions "$app_id"
+}
+
+# A seeded launch runs scripts nobody watches: a system permission dialog
+# would sit over the app for the rest of the run and keep it paused. The
+# permissions in TOOLKIT_FIXTURE_GRANTS are granted before every seeded launch.
+_fixture_grant_permissions() {
+    local permission
+    for permission in ${TOOLKIT_FIXTURE_GRANTS:-}; do
+        "$ADB" -s "$SERIAL" shell pm grant "$1" "$permission" >/dev/null 2>&1 \
+            || echo "⚠ Could not grant $permission."
+    done
 }
 
 _android_debug() {
