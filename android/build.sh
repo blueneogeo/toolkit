@@ -124,8 +124,8 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        running; other work shares it ('emulator stop' shuts it down)
     watch [target] [mode]  Build + launch + auto-redeploy (mode: kotlin|build, default: kotlin)
     test [filter] [timeout] [--no-build|--build-only]
-                       Run unit tests; filter by class name (or Class/method), timeout
-                       in seconds (default $TEST_TIMEOUT). Gradle builds only what changed,
+                       Run unit tests; filter by class name (or Class/method), several
+                       separated by commas, timeout in seconds (default $TEST_TIMEOUT). Gradle builds only what changed,
                        so --no-build is accepted and changes nothing; --build-only builds
                        the tests without running them (and without the local server)
     test instrumented [filter] [timeout] [--build-only] [--keep-installed]
