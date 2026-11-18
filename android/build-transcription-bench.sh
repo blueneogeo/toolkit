@@ -30,7 +30,9 @@ Usage: ./build.sh android transcription-bench [target] [step] [options]
   Options:
     --corpus <dir>       The corpus: manifest.json and the clips it names
                          (default build/transcription-corpus)
-    --prompts <list>     app, none or app,none (default): with the app's prompt, without it, or both
+    --engines <list>     whisper (default), google or whisper,google: the engines to run
+    --prompts <list>     app, none or app,none (default): Whisper with the app's prompt, without it,
+                         or both; Google's engine takes no prompt and runs once
     --clips <ids>        Only these clips, comma separated
     --baseline <file>    The leading platform's results.json for the same clips
     --results <file>     A result file for report; repeat for several phones
@@ -48,17 +50,18 @@ EOF
 }
 
 do_transcription_bench() {
-    local target="" step="" corpus="" prompts="app,none" clips="" baseline="" timeout=14400 as_json=false
+    local target="" step="" corpus="" engines="whisper" prompts="app,none" clips="" baseline="" timeout=14400 as_json=false
     local results=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --corpus | --prompts | --clips | --baseline | --results | --timeout)
+            --corpus | --engines | --prompts | --clips | --baseline | --results | --timeout)
                 if [[ $# -lt 2 || "$2" == --* ]]; then
                     echo "✗ $1 needs a value."
                     return 1
                 fi
                 case "$1" in
                     --corpus) corpus="$2" ;;
+                    --engines) engines="$2" ;;
                     --prompts) prompts="$2" ;;
                     --clips) clips="$2" ;;
                     --baseline) baseline="$2" ;;
@@ -96,6 +99,10 @@ do_transcription_bench() {
         app | none | app,none | none,app) ;;
         *) echo "✗ --prompts takes app, none or app,none"; return 1 ;;
     esac
+    case "$engines" in
+        whisper | google | whisper,google | google,whisper) ;;
+        *) echo "✗ --engines takes whisper, google or whisper,google"; return 1 ;;
+    esac
     corpus="${corpus:-${TRANSCRIPTION_BENCH_CORPUS:-$PROJECT_ROOT/build/transcription-corpus}}"
     [[ "$corpus" == /* ]] || corpus="$PROJECT_ROOT/$corpus"
     if [[ -n "$baseline" && ! -f "$baseline" ]]; then
@@ -105,12 +112,12 @@ do_transcription_bench() {
 
     case "$step" in
         push) _bench_push "$target" "$corpus" ;;
-        run) _bench_run "$target" "$prompts" "$clips" "$timeout" ;;
+        run) _bench_run "$target" "$prompts" "$clips" "$timeout" "$engines" ;;
         report) _bench_report "$corpus" "$baseline" "$as_json" ${results[@]+"${results[@]}"} ;;
         clean) _bench_clean "$target" ;;
         "")
             _bench_push "$target" "$corpus" || return 1
-            _bench_run "$target" "$prompts" "$clips" "$timeout" || return 1
+            _bench_run "$target" "$prompts" "$clips" "$timeout" "$engines" || return 1
             _bench_report "$corpus" "$baseline" "$as_json" "$_BENCH_PULLED"
             ;;
     esac
@@ -176,17 +183,18 @@ _bench_push() {
 }
 
 _bench_run() {
-    local target="$1" prompts="$2" clips="$3" timeout="$4"
+    local target="$1" prompts="$2" clips="$3" timeout="$4" engines="${5:-whisper}"
     _bench_device "$target" || return 1
     local folder
     folder=$(_bench_folder)
     export SCRIPT_ENV_TRANSCRIPTION_BENCH_PROMPTS="$prompts"
+    export SCRIPT_ENV_TRANSCRIPTION_BENCH_ENGINES="$engines"
     if [[ -n "$clips" ]]; then
         export SCRIPT_ENV_TRANSCRIPTION_BENCH_CLIPS="$clips"
     fi
     local code=0
     _android_debug "$SERIAL" --no-build --script "${TRANSCRIPTION_BENCH_SCRIPT:-transcription_benchmark}" --timeout "$timeout" || code=$?
-    unset SCRIPT_ENV_TRANSCRIPTION_BENCH_PROMPTS SCRIPT_ENV_TRANSCRIPTION_BENCH_CLIPS
+    unset SCRIPT_ENV_TRANSCRIPTION_BENCH_PROMPTS SCRIPT_ENV_TRANSCRIPTION_BENCH_ENGINES SCRIPT_ENV_TRANSCRIPTION_BENCH_CLIPS
     local out_dir="$PROJECT_ROOT/build/transcription-bench" out
     mkdir -p "$out_dir"
     out="$out_dir/${SERIAL//[^A-Za-z0-9_-]/_}-$(date +%Y%m%d-%H%M%S).json"

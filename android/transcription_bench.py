@@ -391,7 +391,10 @@ def load_results(path):
 def label(results, run):
     device = results.get("device", {})
     name = f"{results.get('platform', '?')} {device.get('model', '?')}"
-    return f"{name} {run['variant']}"
+    # Runs from before the benchmark named an engine per run were all the file's engine.
+    engine = run.get("engine") or results.get("engine")
+    short = engine.split("/")[0] if engine else None
+    return f"{name} {short} {run['variant']}" if short else f"{name} {run['variant']}"
 
 
 # ── Pass marks ──────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ source "$SCRIPT_DIR/../shared/vision.sh"
 source "$SCRIPT_DIR/../shared/logfmt.sh"
 source "$SCRIPT_DIR/../shared/scripts.sh"
 source "$SCRIPT_DIR/../shared/record-frames.sh"
+source "$SCRIPT_DIR/../shared/compare.sh"
 source "$SCRIPT_DIR/build-device.sh"
 source "$SCRIPT_DIR/build-ui.sh"
 source "$SCRIPT_DIR/build-emulator.sh"
@@ -180,6 +181,9 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        ('./build.sh android record --help')
     ui <tap|swipe|type|press|describe> [args]
                        Drive the screen and read its view tree ('./build.sh android ui')
+    compare <scripts> [target] [--fixture [slot]] [--no-build] [--ios <dir>] [--android <dir>]
+                       Run debug scripts, collect their frames and write build/compare/<run>/index.html
+                       with the iOS frames beside them per frame name ('./build.sh android compare --help')
 
   Online (enable via build.properties):
     sentry <cmd>       Sentry queries (TOOLKIT_SENTRY_ENABLED, ANDROID_SENTRY_PROJECT)
@@ -320,6 +324,7 @@ _dispatch() {
         screenshots) shift; do_screenshots_collect "$@" ;;
         see)         shift; _lock_take emulator && do_see "$@" ;;
         record)      shift; do_record "$@" ;;
+        compare)     shift; do_compare "$@" ;;
         ui)          shift; _ui_wants_lock "$@" && { _lock_take emulator || return 1; }; do_ui "$@" ;;
         lock)        shift; do_lock "$@" ;;
         blocker)     shift; do_blocker "$@" ;;
