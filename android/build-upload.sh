@@ -176,7 +176,9 @@ _upload_size() {
 # holds no class of the debug tools' package.
 _upload_check_release() {
     local ok=0 manifest mapping package debug_package hits
-    manifest=$(find "$PROJECT_ROOT/$ANDROID_MODULE/build/intermediates" -path '*merged_manifest*' -path '*release*' \
+    # merged_manifests holds the manifest after the libraries' are merged in;
+    # merged_manifest only the app's own.
+    manifest=$(find "$PROJECT_ROOT/$ANDROID_MODULE/build/intermediates/merged_manifests/release" \
         -name AndroidManifest.xml -print -quit 2>/dev/null)
     if [[ -z "$manifest" ]]; then
         echo "  ✗ The release build's merged manifest wasn't found"
