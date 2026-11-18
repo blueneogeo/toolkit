@@ -18,7 +18,8 @@ Usage: ./build.sh android ui <command> [<args>]
     swipe <dir>        Full-screen swipe: up | down | left | right
     type <text>        Type into the currently focused field (ASCII only)
     press <button>     Press a button: home | back | lock
-    describe [name]    Print the view tree (class | label | id | frame in dp)
+    describe [name]    Print the view tree (class | label | id | frame in dp); a
+                       tappable node TalkBack has nothing to read for ends in "| no label"
                        and save it to build/screenshots/<name>-ui.txt
 
 Options:
@@ -120,6 +121,10 @@ def walk(node, depth):
         if ident:
             parts.append("id=" + ident)
         parts.append(frame(node))
+        if node.get("clickable") == "true" and not label and not any(
+            (n.get("text") or n.get("content-desc")) for n in node.iter("node")
+        ):
+            parts.append("no label")
         lines.append("  " * depth + " | ".join(parts))
         depth += 1
     for child in node:

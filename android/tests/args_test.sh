@@ -330,7 +330,7 @@ _expect "record launch: launch args last" "'TURN_DEBUG_REFRESH_TOKEN' 'token' '-
 # ── ui ──────────────────────────────────────────────────────────────
 
 cat > "$WORK/state.xml" <<'EOF'
-<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node index="0" text="" resource-id="" class="android.widget.FrameLayout" content-desc="" bounds="[0,0][1206,2622]"><node index="0" text="Send" resource-id="send-button" class="android.view.View" content-desc="" bounds="[30,60][120,180]" /><node index="1" text="" resource-id="com.example.app:id/feed-list" class="android.view.View" content-desc="Your feed" bounds="[0,300][1206,2400]" /></node></hierarchy>
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node index="0" text="" resource-id="" class="android.widget.FrameLayout" content-desc="" bounds="[0,0][1206,2622]"><node index="0" text="Send" resource-id="send-button" class="android.view.View" content-desc="" bounds="[30,60][120,180]" /><node index="1" text="" resource-id="com.example.app:id/feed-list" class="android.view.View" content-desc="Your feed" bounds="[0,300][1206,2400]" /><node index="2" text="" resource-id="close-button" class="android.view.View" content-desc="" clickable="true" bounds="[0,0][132,132]" /></node></hierarchy>
 EOF
 
 _ui_reset() {
@@ -414,6 +414,8 @@ _ui_reset
 out=$(do_ui describe feed 2>&1)
 _expect "ui describe lists test tags in dp" "^  View \| 'Send' \| id=send-button \| x=10 y=20 w=30 h=40$" "$out"
 _expect "ui describe strips the package from ids" "View \| 'Your feed' \| id=feed-list \| x=0 y=100 w=402 h=700" "$out"
+_expect "ui describe marks a control with no label" "id=close-button \| x=0 y=0 w=44 h=44 \| no label$" "$out"
+_expect_not "ui describe leaves a labelled node unmarked" "id=send-button.*no label" "$out"
 _expect "ui describe saves the tree" "feed-ui.txt$" "$out"
 _expect "ui describe saves the same lines" "id=send-button" "$(cat "$WORK/project/build/screenshots/feed-ui.txt" 2>/dev/null)"
 _expect_not "ui describe holds no motion after a clean dump" "HOLD_MOTION" "$(cat "$WORK/state/adb.log")"

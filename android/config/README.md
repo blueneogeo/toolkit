@@ -165,7 +165,7 @@ The target and the flags come in any order. A second target or an unknown flag s
 | `ui swipe up\|down\|left\|right` | A full-screen swipe, with the same start and end points as iOS. |
 | `ui type <text>` | Types into the focused field. ASCII only: `adb shell input text` can't type other characters, so it refuses them. |
 | `ui press home\|back\|lock` | Presses a button. `back` exists only on Android. |
-| `ui describe [name]` | Prints the view tree, one line per node (`class \| 'label' \| id=... \| x y w h` in dp), and saves it to `build/screenshots/<name>-ui.txt`. |
+| `ui describe [name]` | Prints the view tree, one line per node (`class \| 'label' \| id=... \| x y w h` in dp), and saves it to `build/screenshots/<name>-ui.txt`. A tappable node with no text or content description, in itself or below it, ends in `\| no label`: TalkBack has nothing to read for it. |
 
 Every `ui` action except `describe` takes a screenshot afterwards and prints its path last. `--no-shot` skips it; `--delay <ms>` changes the wait before it (700 by default).
 
