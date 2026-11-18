@@ -104,6 +104,7 @@ _build_variant() {
 usage() {
     cat <<EOF
 Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args>]
+       ./build.sh android <command> --help
 
   Target selection (install/launch/uninstall/debug/logs/record/screenshot/see/ui):
     The optional target after the command is: emulator | device | <serial|avd name>.
@@ -117,11 +118,12 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        --force builds from clean
     build              Format, lint (ktlint, detekt) and assemble the configured build type
     clean              Gradle clean, and remove build/ (screenshots, recordings)
-    install [target] [--quiet|-q] [--no-launch]
+    install [target] [--quiet|-q] [--no-launch] [--fixture [slot]]
                        Build, install, adb reverse the server port, launch. --no-launch
                        installs and compiles as Play does without opening the app, so the
                        next launch is the first after an install
-    launch [target] -- [extras...]  Launch the installed app, forwarding am start extras
+    launch [target] [--fixture [slot]] -- [extras...]
+                       Launch the installed app, forwarding am start extras
                        (e.g. --ez turnMuted true); builds first when no APK exists
     uninstall [target] Stop the watcher and the app, and uninstall it. The emulator keeps
                        running; other work shares it ('emulator stop' shuts it down)
@@ -147,6 +149,7 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                  from the app, another process (e.g. system_server) or all of them
     logs [target] [--cat <cat>] [--level <level>] tail  Stream live app logs
     debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build] [--timeout N]
+          [--fixture [slot]]
                        Build (or with --no-build, just relaunch), launch, and trace logs
                        (stops when the app goes to the background or a script run ends).
                        A script run prints each script's result and the failed checks,
@@ -240,6 +243,101 @@ Coordinates are dp, the same numbers as iOS points on a 402x874 screen.
 EOF
 }
 
+# ── Help ────────────────────────────────────────────────────────────
+
+# Every command, as _dispatch knows it. tests/help_test.sh checks both lists agree.
+ANDROID_COMMANDS="setup build clean install launch uninstall watch sentry test lint unused analyze audit
+    format doctor logs debug signin signout emulator push screenshot screenshots see record compare
+    ui lock blocker worktree night sync icons transcription-bench profile benchmark"
+
+# <command> --help: the command's own usage where it has one, else its rows and
+# section in config/README.md.
+_command_help() {
+    case "$1" in
+        doctor) _doctor_usage ;;
+        record) _record_usage ;;
+        ui) _ui_usage ;;
+        sync) _sync_usage ;;
+        lock) _lock_usage ;;
+        blocker) _blocker_usage ;;
+        night) _night_usage ;;
+        worktree) _worktree_usage ;;
+        icons) _icons_usage ;;
+        transcription-bench) _transcription_bench_usage ;;
+        profile) _profile_usage ;;
+        benchmark) _benchmark_usage ;;
+        compare) _compare_usage ;;
+        emulator) _emulator_usage ;;
+        *) _readme_help "$1" ;;
+    esac
+}
+
+_readme_help() {
+    python3 -B - "$1" "$SCRIPT_DIR/config/README.md" <<'PY'
+import re, sys, textwrap
+cmd, readme = sys.argv[1], sys.argv[2]
+starts = re.compile(r"`" + re.escape(cmd) + r"[ `]")
+rows, section, heading = [], [], None
+for line in open(readme, encoding="utf-8"):
+    line = line.rstrip("\n")
+    if line.startswith("#"):
+        heading = line.lstrip("#").strip()
+        continue
+    if line.startswith("|"):
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if len(cells) >= 2 and starts.search(cells[0]):
+            rows.append(cells[:2])
+        continue
+    if heading == cmd:
+        section.append(line)
+if not rows and not section:
+    print(f"No help for '{cmd}' in {readme}.")
+    sys.exit(1)
+
+def plain(text):
+    return text.replace("`", "")
+
+def wrap(text, first, rest):
+    return textwrap.fill(text, 88, initial_indent=first, subsequent_indent=rest,
+                         break_on_hyphens=False, break_long_words=False)
+
+usages, body = [], []
+for usage, does in rows:
+    for part in re.split(r"` / `|`, `", usage):
+        usages.append(plain(part).strip())
+    if does == "Below.":
+        continue
+    indent = "  "
+    if len(rows) > 1:
+        body.append(f"  {plain(usage)}")
+        indent = "      "
+    body.append(wrap(plain(does), indent, indent))
+    body.append("")
+fenced = False
+for line in section:
+    if line.startswith("```"):
+        fenced = not fenced
+        continue
+    if fenced:
+        body.append("    " + line)
+        continue
+    if not line.strip():
+        if body and body[-1] != "":
+            body.append("")
+        continue
+    item = re.match(r"(\d+\.|-) ", line)
+    hang = " " * (len(item.group(0)) if item else 0)
+    body.append(wrap(plain(line), "  ", "  " + hang))
+while body and body[-1] == "":
+    body.pop()
+for i, usage in enumerate(usages):
+    print(("Usage: " if i == 0 else "       ") + "./build.sh android " + usage)
+if usages:
+    print()
+print("\n".join(body))
+PY
+}
+
 _dispatch() {
     _INVOCATION="android $*"
     _DEVICE_SELECTOR="${ANDROID_DEVICE:-}"
@@ -291,6 +389,15 @@ _dispatch() {
             return 1
             ;;
     esac
+
+    if [[ -n "${1:-}" && ( "${2:-}" == "--help" || "${2:-}" == "-h" ) ]]; then
+        if [[ " $(echo $ANDROID_COMMANDS) " != *" $1 "* ]]; then
+            echo "✗ Unknown android command: $1"
+            return 1
+        fi
+        _command_help "$1"
+        return
+    fi
 
     case "${1:-}" in
         setup)       shift; do_setup "$@" ;;

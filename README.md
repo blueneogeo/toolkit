@@ -7,10 +7,10 @@ generate a thin `build.sh` entry via `./build.sh`-style scaffolding.
 ## Platforms
 
 | Folder | Status | Use |
-|---|---|---|---|
+|---|---|---|
 | `ios/` | ready | iOS app builds, lint gates, install/watch/test with Debug/Profile/Release configurations, Instruments profiling, logs/debug, e2e, TestFlight upload, Sentry queries, screenshots/vision |
 | `server/` | ready | Go server builds, start/stop/watch, lint/test, deploy/rollback (Fly.io), migrations, Sentry queries |
-| `android/` | ready | Gradle build, ktlint/detekt/Android Lint, unit tests with debug/profile/release build types, install/launch/uninstall, logs/debug with debug scripts, screenshots, in-app screenshot collection, screen recording with frames, UI driving, emulator start/stop, Perfetto profiling and Macrobenchmarks, and overnight tools (locks, blocker log, night queue, package worktrees, doctor with a watchdog), the parity map and the sync ledger with the leading platform, with the same arguments and output as `ios` |
+| `android/` | ready | Gradle build, ktlint/detekt/Android Lint, unit tests with debug/profile/release build types, install/launch/uninstall, logs/debug with debug scripts, screenshots, in-app screenshot collection, screen recording with frames, UI driving, emulator start/stop/restart/create, contacts, text size and pushes, the iOS and Android frames side by side (`compare`), Perfetto profiling and Macrobenchmarks, the transcription benchmark, Material Symbols from the iOS SF Symbols, and shared-machine tools (locks, blocker log, night queue, package worktrees, doctor with a watchdog), the parity map and the sync ledger with the leading platform, with the same arguments and output as `ios` |
 | `web/` | planned | — |
 
 ## Adding the toolkit to a project
@@ -30,9 +30,9 @@ per-project via the platform's `./build.sh configure`.
 
 ## Per-platform docs
 
-- `ios/config/README.md` — full iOS toolkit reference
-- `server/config/README.md` — full server toolkit reference
-- `android/config/README.md` — Android toolkit reference
+- `ios/config/README.md`: full iOS toolkit reference
+- `server/config/README.md`: full server toolkit reference
+- `android/config/README.md`: Android toolkit reference. `./build.sh android <command> --help` prints one command's entry from it, or the command's own usage text where it has one; `android/tests/help_test.sh` checks the two name the same flags.
 
 ## Build server
 

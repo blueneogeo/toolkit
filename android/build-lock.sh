@@ -28,6 +28,9 @@ Usage: ./build.sh android lock <gradle|emulator> -- <command...>
 
     ./build.sh android lock emulator -- sh -c './build.sh android debug --script lens_check && ./build.sh android screenshots collect'
 
+  TOOLKIT_EMULATOR_LOCK=<name> makes the emulator lock emulator-<name>, for an
+  emulator nobody else uses (one kept open for a person to look at).
+
   Locks whose holder has exited are cleared. Locks live in
   <overnight>/locks/ (TOOLKIT_OVERNIGHT_DIR).
 EOF
