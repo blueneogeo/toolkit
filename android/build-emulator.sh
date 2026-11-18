@@ -282,8 +282,9 @@ for card in re.findall(r"BEGIN:VCARD(.*?)END:VCARD", text, re.S | re.I):
             phones.append(value)
     name = name or structured
     if name or emails or phones:
-        clean = lambda s: s.replace("\t", " ").replace(",", " ")
-        print("\t".join([clean(name), ",".join(map(clean, emails)), ",".join(map(clean, phones))]))
+        clean = lambda s: s.replace("\x1f", " ").replace(",", " ")
+        # A unit separator, not a tab: bash read merges empty tab-separated fields, and a card without a name lost its address.
+        print("\x1f".join([clean(name), ",".join(map(clean, emails)), ",".join(map(clean, phones))]))
 '
 }
 
@@ -320,7 +321,7 @@ _emulator_contact() {
     "$ADB" -s "$SERIAL" push "$file" /sdcard/Download/ >/dev/null 2>&1 || true
     local name emails phones count=0 out id value
     # The rows come on fd 3: adb shell reads stdin.
-    while IFS=$'\t' read -r -u 3 name emails phones; do
+    while IFS=$'\x1f' read -r -u 3 name emails phones; do
         out=$(_content_insert content://com.android.contacts/raw_contacts "account_type:n:" "account_name:n:")
         if grep -qiE "error|exception" <<<"$out"; then
             echo "✗ Could not add a contact:"
