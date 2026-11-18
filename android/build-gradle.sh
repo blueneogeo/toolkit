@@ -274,7 +274,10 @@ for path in sorted(glob.glob(os.path.join(os.environ["DIR"], "**", "TEST-*.xml")
         problem = case.find("failure")
         if problem is None:
             problem = case.find("error")
-        if problem is not None:
+        # AGP 9 writes an ignored instrumented test as an empty <failure>.
+        if problem is not None and problem.tag == "failure" and not problem.get("message") and not (problem.text or "").strip():
+            skipped += 1
+        elif problem is not None:
             failed += 1
             message = (problem.get("message") or problem.text or "").strip().splitlines()
             name = case.get("classname", "").split(".")[-1] + "." + case.get("name", "")
