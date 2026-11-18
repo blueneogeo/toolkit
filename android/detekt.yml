@@ -122,9 +122,11 @@ turn:
   NoAnyErasure:
     active: true
     # Stand in for Foundation's UserDefaults, which stores Any, and NotificationCenter,
-    # whose object is Any? (iOS's gate lets Any? and [AnyHashable: Any] through).
+    # whose object is Any? (iOS's gate lets Any? and [AnyHashable: Any] through). The debug
+    # Registry holds AnyObject on iOS, which iOS's gate lets through too.
     allowedFiles:
       - service/UserDefaults.kt
       - service/NotificationCenter.kt
+      - debugTools/kotlin/com/sendaturn/app/Registry.kt
   UnusedParameter:
     active: true
