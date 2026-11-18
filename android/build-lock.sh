@@ -36,13 +36,23 @@ EOF
 _lock_holders() {
     case "$1" in
         gradle) echo 2 ;;
-        emulator) echo 1 ;;
+        emulator | emulator-*) echo 1 ;;
         *) return 1 ;;
     esac
 }
 
 _lock_dir() {
     echo "$(_overnight_root)/locks"
+}
+
+# TOOLKIT_EMULATOR_LOCK names a separate emulator lock (emulator-<name>), for work on an
+# emulator nobody else uses, such as one kept open for a person to look at.
+_lock_name() {
+    if [[ "$1" == emulator && -n "${TOOLKIT_EMULATOR_LOCK:-}" ]]; then
+        echo "emulator-$TOOLKIT_EMULATOR_LOCK"
+    else
+        echo "$1"
+    fi
 }
 
 _lock_is_held_here() {
@@ -83,7 +93,8 @@ _lock_describe_holders() {
 }
 
 _lock_take() {
-    local name="$1"
+    local name
+    name=$(_lock_name "$1")
     _lock_is_held_here "$name" && return 0
     local holders dir
     holders=$(_lock_holders "$name") || { echo "✗ Unknown lock '$name'. Use gradle or emulator."; return 1; }
@@ -124,7 +135,8 @@ _lock_take() {
 }
 
 _lock_release() {
-    local name="$1" kept=() slot
+    local name kept=() slot
+    name=$(_lock_name "$1")
     for slot in ${_LOCK_SLOTS[@]+"${_LOCK_SLOTS[@]}"}; do
         if [[ "$(basename "$slot")" == "$name".* ]]; then
             rm -rf "$slot"
