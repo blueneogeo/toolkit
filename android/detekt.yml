@@ -121,8 +121,10 @@ turn:
     active: true
   NoAnyErasure:
     active: true
-    # Stands in for Foundation's UserDefaults, which stores Any.
+    # Stand in for Foundation's UserDefaults, which stores Any, and NotificationCenter,
+    # whose object is Any? (iOS's gate lets Any? and [AnyHashable: Any] through).
     allowedFiles:
       - service/UserDefaults.kt
+      - service/NotificationCenter.kt
   UnusedParameter:
     active: true
