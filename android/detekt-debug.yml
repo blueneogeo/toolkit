@@ -1,0 +1,23 @@
+# The debug scripts (debug/) and debug tools (src/debugTools), on top of detekt.yml,
+# as ios/debug/.swiftlint.yml is on top of .swiftlint.yml.
+
+potential-bugs:
+  UnsafeCallOnNullableType:
+    active: false # force_unwrapping
+
+complexity:
+  LongMethod:
+    active: false # function_body_length
+
+style:
+  MaxLineLength:
+    active: false # line_length
+
+empty-blocks:
+  EmptyFunctionBlock:
+    active: false # no_empty_block
+
+naming:
+  InvalidPackageDeclaration:
+    # debug/ is the package com.sendaturn.app.debug without the package's folders.
+    excludes: ['**/debug/*.kt', '**/debug/**/*.kt']

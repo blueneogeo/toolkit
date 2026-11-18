@@ -1,0 +1,1 @@
+fun load() = runBlocking { fetch() }

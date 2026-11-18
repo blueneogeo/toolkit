@@ -1,0 +1,1 @@
+fun AppState.onFeedReload() = Unit
