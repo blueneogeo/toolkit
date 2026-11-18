@@ -34,6 +34,7 @@ source "$SCRIPT_DIR/build-worktree.sh"
 source "$SCRIPT_DIR/build-doctor.sh"
 source "$SCRIPT_DIR/build-sync.sh"
 source "$SCRIPT_DIR/build-setup.sh"
+source "$SCRIPT_DIR/build-icons.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/android.pid"
 TEST_TIMEOUT=120
@@ -183,6 +184,8 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
     sync <status|diff|mark|map|init|coverage|guide>
                        Compare with iOS and keep the per-unit ledger under sync/
                        ('./build.sh android sync --help')
+    icons [generate|check|scan|sheet]
+                       Material Symbols drawables from icons.toml ('./build.sh android icons help')
 
   Overnight work:
     lock <gradle|emulator> -- <command...>
@@ -301,6 +304,7 @@ _dispatch() {
         worktree)    shift; do_worktree "$@" ;;
         night)       shift; do_night "$@" ;;
         sync)        shift; do_sync "$@" ;;
+        icons)       shift; do_icons "$@" ;;
         help|--help|-h|"") usage ;;
         *)
             echo "✗ Unknown android command: $1"

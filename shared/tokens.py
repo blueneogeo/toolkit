@@ -57,6 +57,8 @@ from pathlib import Path
 
 SCHEMA = 2
 FILE_KEYS = {"schema", "ios_commit"}
+# Files in the token folders that other tools read (icons.toml: toolkit/android/icons.py).
+NOT_TOKENS = {"icons.toml"}
 META_KEYS = {"source", "role", "platform", "composited", "style", "ios_text_style", "scales"}
 VALUE_KEYS = {"value", "type"}
 COLOR_KEYS = {"hex", "ref", "alpha", "increased"}
@@ -451,6 +453,8 @@ def read_folders(folders):
     tables = {}
     for folder in folders:
         for path in sorted(Path(folder).glob("*.toml")):
+            if path.name in NOT_TOKENS:
+                continue
             with path.open("rb") as handle:
                 try:
                     data = tomllib.load(handle)
