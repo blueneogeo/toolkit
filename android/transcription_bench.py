@@ -374,6 +374,7 @@ def score_run(run, clips, lexicons):
         "first_load_ms": run["load"]["ms"],
         "load_memory_mb": [run["load"]["memoryBeforeMB"], run["load"]["memoryAfterMB"], run["load"]["peakMemoryMB"]],
         "peak_memory_mb": max([r.get("peakMemoryMB", 0) for r in done] + [run["load"]["peakMemoryMB"]]),
+        "peak_pss_mb": max([r.get("peakPssMB", 0) for r in done] + [run["load"].get("peakPssMB", 0)]),
         "thermal_max": thermal,
         "per_clip": clip_rows,
     }
@@ -474,6 +475,7 @@ def print_report(scored, baseline):
         ["first load s"] + [number(s["first_load_ms"] / 1000) for s in scores],
         ["memory before / after load MB"] + [f"{s['load_memory_mb'][0]} / {s['load_memory_mb'][1]}" for s in scores],
         ["peak memory MB (PSS + native heap)"] + [str(s["peak_memory_mb"]) for s in scores],
+        ["peak PSS MB"] + [str(s["peak_pss_mb"] or "-") for s in scores],
         ["highest thermal status"] + [THERMAL_NAMES[s["thermal_max"]] if s["thermal_max"] < len(THERMAL_NAMES) else str(s["thermal_max"]) for s in scores],
         ["negative clips"] + [str(s["negative"]["clips"]) for s in scores],
         ["words on them, filtered"] + [str(s["negative"]["filtered_words"]) for s in scores],
