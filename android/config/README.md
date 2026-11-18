@@ -216,6 +216,10 @@ The extractors build on first use into `build/parity-tools/`: the Swift one with
 
 `parity.toml` holds the rules: source roots, tiers, how file names and enum cases change, split and moved files, renames, the type map for framework types, and the iOS-only and Android-only lists with their reasons.
 
+### transcription-bench
+
+The transcription quality test's host side (Turn's `spec/recording.md` 6.6). `push` copies the clips that the corpus's `manifest.json` names (default `build/transcription-corpus`, with human reference lines per clip) into the debug app's `files/transcription-bench/` with `run-as`, and a list of ids and files without the references. `run` launches the debug script `TRANSCRIPTION_BENCH_SCRIPT` (`transcription_benchmark`) with `--prompts` and `--clips` as launch extras and pulls its `results.json` into `build/transcription-bench/<serial>-<time>.json`. `report` scores result files with `transcription_bench.py`: WER after normalising (lower case, no accents or punctuation, numbers spelled out), the switching clips' WER and words in the wrong language, caption start error, words on negative clips, real-time factor, first load, memory and thermal status, with the pass marks against `--baseline`. Without a step it does all three. `clean` removes the folder from the app, the benchmark's own model copy included. Its tests: `python3 -B toolkit/android/tests/transcription_bench_test.py`.
+
 ### worktree
 
 `worktree new <package>` adds `<TOOLKIT_WORKTREE_DIR>/<package>` on a new branch `pkg/<package>` from the main checkout's current branch, fills each submodule from the main checkout's own clone (`git -c protocol.file.allow=always submodule update --init`, no network), copies `local.properties` and `build.properties.local`, and prints the path last. The submodule is checked out at the commit the branch pins; when the main checkout's clone is ahead, it says so, because worktrees only get toolkit changes once the pointer is committed.
