@@ -418,8 +418,14 @@ do_android_handler_suffix_check() {
     local src approved violations="" name suffix matched location
     src=$(_lint_state_dir)
     approved=$(_android_handler_suffixes)
+    # Android-only handlers recorded in parity.toml (android_only_symbol) keep the name the plan gave them.
+    local recorded=""
+    if [[ -f "$PROJECT_ROOT/parity.toml" ]]; then
+        recorded=" $(grep -oE '"AppState\.on[A-Za-z0-9]+"' "$PROJECT_ROOT/parity.toml" | tr -d '"' | sed 's/^AppState\.//' | tr '\n' ' ')"
+    fi
     while IFS= read -r name; do
         [[ -n "$name" ]] || continue
+        [[ "$recorded " == *" $name "* ]] && continue
         matched=false
         for suffix in $approved; do
             if [[ "$name" =~ ${suffix}$ ]]; then
