@@ -62,6 +62,9 @@ case "$*" in
 DUMP
         ;;
     "shell pm clear com.example.app") echo Success ;;
+    "shell perfetto"*) cat > /dev/null; echo 1234 ;;
+    "shell test -d /proc/1234") exit 1 ;;
+    "pull "*.pftrace" "*) all="$*"; echo trace > "${all##* }" ;;
 esac
 exit 0
 EOF
@@ -463,6 +466,44 @@ _expect "screenshot takes a target and a name" "build/screenshots/named.png$" "$
     do_screenshots_collect collect emulator
 ) > "$WORK/out" 2>&1
 _expect "screenshots collect with nothing saved" "No scripted screenshots found" "$(cat "$WORK/out")"
+
+# ── profile ─────────────────────────────────────────────────────────
+
+_reset_state
+out=$(do_profile --seconds soon 2>&1); code=$?
+_expect "profile --seconds soon" "whole number of seconds" "$out"
+_expect_code "profile --seconds soon" 1 "$code"
+out=$(do_profile --until later 2>&1)
+_expect "profile --until later" "--until takes seconds" "$out"
+out=$(do_profile --callers 2>&1)
+_expect "profile --callers without a name" "--callers needs a value" "$out"
+out=$(do_profile emulator device 2>&1)
+_expect "profile with two targets" "Two targets: emulator and device" "$out"
+out=$(do_profile --colour 2>&1)
+_expect "profile with an unknown flag" "Unknown flag: --colour" "$out"
+out=$(do_profile --trace "$WORK/missing.pftrace" 2>&1)
+_expect "profile --trace of a missing file" "No trace at" "$out"
+
+_reset_state
+(
+    _use_target() { :; }
+    _app_id() { echo com.example.app; }
+    _profile_install_if_changed() { :; }
+    _reverse_server_port() { :; }
+    _profile_fresh_data() { echo "FRESH"; }
+    _fixture_extras() { _FIXTURE_EXTRAS=(--es TURN_DEBUG_REFRESH_TOKEN tok); }
+    _am_start() { shift; echo "EXTRAS=$*"; }
+    _profile_summary() { echo "SUMMARY=$*"; }
+    { _profile_config "com.example.app" 7; _profile_sampling_config "com.example.app" 5; } | grep -E 'duration_ms|atrace_apps|target_cmdline'
+    AGENT_SLOT=3 do_profile emulator --script deck_swipe_perf --fixture --main --until 2.5 --callers measure --seconds 1
+) > "$WORK/out" 2>&1
+out=$(cat "$WORK/out")
+_expect "profile config lasts the seconds" "duration_ms: 7000" "$out"
+_expect "profile config traces the app" 'atrace_apps: "com.example.app"' "$out"
+_expect "profile config samples the app" 'target_cmdline: "com.example.app"' "$out"
+_expect "profile --fixture clears data first" "FRESH" "$out"
+_expect "profile --script launches without the marker" "EXTRAS=--es TURN_DEBUG_SCRIPT_NAMES deck_swipe_perf --es TURN_DEBUG_SCRIPT_NO_MARKER 1 .*--es TURN_DEBUG_REFRESH_TOKEN tok" "$out"
+_expect "profile reads the trace with its options" "SUMMARY=/data/local/tmp/turn-profile_.*\.pftrace com.example.app measure true 2.5 false" "$out"
 
 echo ""
 if [[ $FAILED -gt 0 ]]; then
