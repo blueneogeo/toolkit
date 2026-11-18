@@ -739,9 +739,10 @@ do_android_audit() {
 
 # Called by _lint_fast after ktlint and detekt.
 do_android_arch_checks() {
-    local gate
+    local gate failed=0
     for gate in "${ANDROID_GATES[@]}"; do
-        "$gate" || return 1
+        "$gate" || failed=1
     done
-    do_android_project_lint_hook || return 1
+    do_android_project_lint_hook || failed=1
+    return "$failed"
 }

@@ -132,25 +132,29 @@ if len(shown) > 80:
 }
 
 # ktlint and detekt checks, then the project's own grep gates when a lint
-# file declares do_android_arch_checks.
+# file declares do_android_arch_checks. Every check runs, so one failure
+# doesn't hide the others.
 _lint_fast() {
-    local tasks=()
+    local tasks=() failed=false
     _gradle_has_plugin ktlint && tasks+=(ktlintCheck)
     _gradle_has_plugin detekt && tasks+=(detekt)
     if [[ ${#tasks[@]} -gt 0 ]]; then
-        if ! _gradle_run lint "${tasks[@]}"; then
+        if ! _gradle_run lint --continue "${tasks[@]}"; then
             echo "✗ Lint failed:"
             _gradle_failure "$(_gradle_log lint)"
-            echo "✗ Lint failed. Fix violations before building."
-            return 1
+            failed=true
         fi
     fi
     if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]] && declare -F do_android_arch_checks >/dev/null; then
-        do_android_arch_checks || return 1
+        do_android_arch_checks || failed=true
     fi
     if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
-        _tokens_gate || return 1
-        _parity_gate || return 1
+        _tokens_gate || failed=true
+        _parity_gate || failed=true
+    fi
+    if $failed; then
+        echo "✗ Lint failed. Fix violations before building."
+        return 1
     fi
     echo "✓ Lint passed"
 }
