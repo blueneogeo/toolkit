@@ -37,6 +37,7 @@ source "$SCRIPT_DIR/build-sync.sh"
 source "$SCRIPT_DIR/build-setup.sh"
 source "$SCRIPT_DIR/build-icons.sh"
 source "$SCRIPT_DIR/build-transcription-bench.sh"
+source "$SCRIPT_DIR/build-profile.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/android.pid"
 TEST_TIMEOUT=120
@@ -194,6 +195,16 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
     icons [generate|check|scan|sheet]
                        Material Symbols drawables from icons.toml ('./build.sh android icons help')
 
+  Performance:
+    profile [target] [--script <names>] [--seconds N] [--render] [--name <label>] [--gfxinfo]
+            [--main] [--until <seconds>] [--callers <function>] [--trace <file>] [--fixture [slot]]
+                       Record a Perfetto trace of the installed app (default 40 s) and print the
+                       FrameMonitor lines, CPU per thread, the heaviest functions and the app's
+                       own code; --main adds the main thread's busy time per quarter second
+                       ('./build.sh android profile --help')
+    benchmark [target] [Class[#method]] [--build-only] [--fixture [slot]]
+                       Run the Macrobenchmarks (startup, deck swipe) against the profile build
+
   Quality tests:
     transcription-bench [target] [push|run|report|clean] [--corpus <dir>] [--baseline <file>] [...]
                        Run a corpus of clips through the app's transcription engine and print
@@ -322,6 +333,8 @@ _dispatch() {
         sync)        shift; do_sync "$@" ;;
         icons)       shift; do_icons "$@" ;;
         transcription-bench) shift; do_transcription_bench "$@" ;;
+        profile)     shift; do_profile "$@" ;;
+        benchmark)   shift; do_benchmark "$@" ;;
         help|--help|-h|"") usage ;;
         *)
             echo "✗ Unknown android command: $1"
