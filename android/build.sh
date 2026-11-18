@@ -128,8 +128,9 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        in seconds (default $TEST_TIMEOUT). Gradle builds only what changed,
                        so --no-build is accepted and changes nothing; --build-only builds
                        the tests without running them (and without the local server)
-    test instrumented [filter] [timeout] [--build-only]
-                       Run the tests under src/androidTest on the emulator or a phone
+    test instrumented [filter] [timeout] [--build-only] [--keep-installed]
+                       Run the tests under src/androidTest on the emulator or a phone;
+                       --keep-installed leaves the app and its data for a second run
     lint               ktlint, detekt, the grep gates, the token gate, the parity gate and Android Lint on all sources
     unused             What R8 removes from the profile build, the app's own code only
     analyze            Android Lint with compose-lints, every warning an error

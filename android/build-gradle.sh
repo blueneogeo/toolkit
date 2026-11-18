@@ -300,6 +300,7 @@ _test_args() {
     _TEST_FILTER=""
     _TEST_TIMEOUT=$TEST_TIMEOUT
     _TEST_BUILD_ONLY=false
+    _TEST_KEEP_INSTALLED=false
     local arg
     for arg in "$@"; do
         if [[ "$arg" =~ ^[0-9]+$ ]]; then
@@ -308,6 +309,8 @@ _test_args() {
             :
         elif [[ "$arg" == "--build-only" ]]; then
             _TEST_BUILD_ONLY=true
+        elif [[ "$arg" == "--keep-installed" ]]; then
+            _TEST_KEEP_INSTALLED=true
         elif [[ "$arg" == -* ]]; then
             echo "✗ Unknown flag: $arg"
             return 1
@@ -409,9 +412,11 @@ _instrumented_class() {
     echo "${package:+$package.}$name"
 }
 
-# test instrumented [filter] [timeout] [--no-build|--build-only]: the tests
-# under src/androidTest, on the emulator or a phone (the target of
+# test instrumented [filter] [timeout] [--no-build|--build-only|--keep-installed]:
+# the tests under src/androidTest, on the emulator or a phone (the target of
 # --device or ANDROID_DEVICE, else the running emulator, else the one phone).
+# --keep-installed leaves the app and its data in place after the run, for a
+# test that checks what a second run in a new process finds.
 do_test_instrumented() {
     _gradle_require || return 1
     _test_args "$@" || return 1
@@ -426,6 +431,9 @@ do_test_instrumented() {
         _require_server
     fi
     local args=(":$ANDROID_MODULE:connected${variant}AndroidTest")
+    if $_TEST_KEEP_INSTALLED; then
+        args+=("-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true")
+    fi
     if [[ -n "$_TEST_FILTER" ]]; then
         local class method=""
         class="${_TEST_FILTER%%/*}"
