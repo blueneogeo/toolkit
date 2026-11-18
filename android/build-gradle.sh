@@ -7,7 +7,7 @@
 #           do_test_instrumented, do_lint, do_format
 # Depends on: _build_config, _build_variant, ANDROID_MODULE (build.sh)
 # Depends on: _lock_take, _lock_release (build-lock.sh), _night_dir (build-overnight.sh)
-# Depends on: _parity_gate (build-sync.sh)
+# Depends on: _parity_gate (build-sync.sh), _icons_gate (build-icons.sh)
 
 TOKENS_PY="$SCRIPT_DIR/../shared/tokens.py"
 
@@ -150,6 +150,7 @@ _lint_fast() {
     fi
     if [[ "${TOOLKIT_ARCH_CHECKS:-true}" == "true" ]]; then
         _tokens_gate || failed=true
+        _icons_gate || failed=true
         _parity_gate || failed=true
     fi
     if $failed; then
