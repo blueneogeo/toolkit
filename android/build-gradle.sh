@@ -180,6 +180,28 @@ do_build() {
     _assemble
 }
 
+# Builds the Android App Bundle of the configured build type and prints its
+# path and size. Release builds stay unsigned without a release signing config.
+do_bundle() {
+    _gradle_require || return 1
+    local variant config dir aab
+    variant=$(_build_variant)
+    config=$(_build_config)
+    echo "→ Bundling $ANDROID_APP_NAME ($config)"
+    if ! _gradle_run bundle ":$ANDROID_MODULE:bundle$variant"; then
+        echo "✗ Bundle failed:"
+        _gradle_failure "$(_gradle_log bundle)"
+        return 1
+    fi
+    dir="$PROJECT_ROOT/$ANDROID_MODULE/build/outputs/bundle/$config"
+    aab=$(find "$dir" -name '*.aab' -print -quit 2>/dev/null)
+    if [[ -z "$aab" ]]; then
+        echo "✗ No .aab under $dir"
+        return 1
+    fi
+    echo "✓ Bundle complete: $(du -h "$aab" | cut -f1 | tr -d ' ') $aab"
+}
+
 do_clean() {
     _gradle_require || return 1
     echo "Cleaning $ANDROID_APP_NAME."

@@ -117,6 +117,7 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        the Gradle wrapper, then a build. Re-runs do only what is missing;
                        --force builds from clean
     build              Format, lint (ktlint, detekt) and assemble the configured build type
+    bundle             Build the App Bundle (.aab) of the configured build type and print its size
     clean              Gradle clean, and remove build/ (screenshots, recordings)
     install [target] [--quiet|-q] [--no-launch] [--fixture [slot]]
                        Build, install, adb reverse the server port, launch. --no-launch
@@ -402,6 +403,7 @@ _dispatch() {
     case "${1:-}" in
         setup)       shift; do_setup "$@" ;;
         build)       do_build ;;
+        bundle)      do_bundle ;;
         clean)       do_clean ;;
         install)     shift; do_install "$@" ;;
         launch)      shift; do_launch "$@" ;;

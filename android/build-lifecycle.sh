@@ -150,8 +150,16 @@ _am_start() {
     for arg in "$@" ${extra[@]+"${extra[@]}"}; do
         cmd+=" $(_device_quote "$arg")"
     done
-    local out
+    local out tries=0
     out=$("$ADB" -s "$SERIAL" shell "$cmd" 2>&1 | tr -d '\r')
+    # When the killed app's task is still there, the start is delivered to its
+    # top and no process starts: right after an install, or under a permission
+    # dialog the last run left open. Start it again in a cleared task.
+    while grep -q "delivered to currently running top-most instance" <<<"$out" && [[ $tries -lt 3 ]]; do
+        tries=$((tries + 1))
+        sleep 1
+        out=$("$ADB" -s "$SERIAL" shell "${cmd/am start /am start --activity-clear-task }" 2>&1 | tr -d '\r')
+    done
     if grep -qE "^Error|Exception" <<<"$out"; then
         echo "✗ Launch failed:"
         grep -E "Error|Exception" <<<"$out" | head -5 | sed 's/^/  /'
