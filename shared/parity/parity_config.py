@@ -117,6 +117,9 @@ class Config:
             return [os.path.join(self.android_debug, rel[: -len(".swift")] + ".kt")]
         if ios_path.startswith(self.ios_tests + "/") and self.android_tests:
             rel = ios_path[len(self.ios_tests) + 1:]
+            # A test file whose classes Android keeps in several files: [[split]] with the iOS path in full.
+            if ios_path in self.splits:
+                return [os.path.join(self.android_tests, name) for name in self.splits[ios_path]]
             folder, name = os.path.split(rel)
             return [os.path.join(self.android_tests, folder.lower(), name[: -len(".swift")] + ".kt")]
         return []
