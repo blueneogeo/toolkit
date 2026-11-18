@@ -170,10 +170,11 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        Copy the in-app screenshots of debug scripts into build/screenshots/
     see [target] [--focus "<question>"]
                        Capture the screen and describe it with the vision model
-    record [target] [name] [--seconds N] [--script <names>] [--frames <fps>]
+    record [target] [name] [--seconds N] [--script <names>] [--frames <fps>] [--fixture [slot]]
                        Record the screen to build/recordings/<name>.mp4 (at most 180 s);
-                       --script films debug scripts from launch, --frames cuts frames
-                       and contact sheets ('./build.sh android record --help')
+                       --script films debug scripts from launch, --fixture seeds that
+                       launch, --frames cuts frames and contact sheets
+                       ('./build.sh android record --help')
     ui <tap|swipe|type|press|describe> [args]
                        Drive the screen and read its view tree ('./build.sh android ui')
 
@@ -208,7 +209,9 @@ Options:
 
     ANDROID_LAUNCH_ARGS="<extras>"
                                am start extras added to every launch,
-                               e.g. "--ez turnMuted true".
+                               e.g. "--ez turnMuted true", or
+                               "--es TURN_CLOCK 2026-11-17T23:47:43Z" to start
+                               the debug build's clock at that instant.
 
 Coordinates are dp, the same numbers as iOS points on a 402x874 screen.
 EOF

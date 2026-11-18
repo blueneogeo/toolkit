@@ -16,7 +16,7 @@ Usage: ./build.sh android ui <command> [<args>]
     swipe <x1> <y1> <x2> <y2>
                        Drag from one point to another
     swipe <dir>        Full-screen swipe: up | down | left | right
-    type <text>        Type into the currently focused field
+    type <text>        Type into the currently focused field (ASCII only)
     press <button>     Press a button: home | back | lock
     describe [name]    Print the view tree (class | label | id | frame in dp)
                        and save it to build/screenshots/<name>-ui.txt
@@ -55,8 +55,39 @@ _ui_screen_size() {
         END { size = override ? override : physical; if (!size) exit 1; split(size, p, "x"); printf "%d %d", p[1] / s + 0.5, p[2] / s + 0.5 }'
 }
 
+UI_DUMP_RETRIES=3
+UI_DUMP_RETRY_DELAY=0.5
+
+_ui_dump_once() {
+    "$ADB" -s "$SERIAL" exec-out uiautomator dump --compressed /dev/tty 2>/dev/null | sed 's/UI hierchary dumped to.*//' || true
+}
+
+# Asks the debug build to hold its endless animations (true) or let them run
+# again (false). The receiver listens for <app id>.HOLD_MOTION with the boolean
+# extra "hold"; a build without one ignores the broadcast.
+_ui_hold_motion() {
+    local app_id
+    app_id=$(_app_id 2>/dev/null) || return 0
+    "$ADB" -s "$SERIAL" shell am broadcast -a "$app_id.HOLD_MOTION" -p "$app_id" --ez hold "$1" >/dev/null 2>&1 || true
+}
+
+# uiautomator dump fails while an animation keeps the screen from going idle.
+# After a failed dump the app is asked to hold its motion, and the dump is
+# tried again, three times 500 ms apart.
 _ui_dump_xml() {
-    "$ADB" -s "$SERIAL" exec-out uiautomator dump --compressed /dev/tty 2>/dev/null | sed 's/UI hierchary dumped to.*//'
+    local xml retries=0 held=false
+    xml=$(_ui_dump_once)
+    while [[ "$xml" != *"<hierarchy"* && $retries -lt $UI_DUMP_RETRIES ]]; do
+        if ! $held; then
+            _ui_hold_motion true
+            held=true
+        fi
+        sleep "$UI_DUMP_RETRY_DELAY"
+        xml=$(_ui_dump_once)
+        retries=$((retries + 1))
+    done
+    $held && _ui_hold_motion false
+    printf '%s\n' "$xml"
 }
 
 # Formats the uiautomator XML as one line per node, frames in dp.
@@ -152,6 +183,10 @@ _ui_shot() {
 # everything else is escaped for the device shell.
 _ui_input_text() {
     local text="$1" escaped
+    if LC_ALL=C grep -q '[^ -~]' <<<"$text"; then
+        echo "✗ type sends ASCII only: adb's input text can't type other characters."
+        return 2
+    fi
     escaped=$(TEXT="$text" python3 -c '
 import os, re
 text = os.environ["TEXT"].replace(" ", "%s")
@@ -299,10 +334,14 @@ do_ui() {
                 echo "✗ type expects text, e.g. ./build.sh android ui type \"hello\""
                 return 1
             fi
-            _ui_input_text "${args[*]}" || {
+            local typed=0
+            _ui_input_text "${args[*]}" || typed=$?
+            if [[ $typed -eq 2 ]]; then
+                return 1
+            elif [[ $typed -ne 0 ]]; then
                 echo "✗ type failed."
                 return 1
-            }
+            fi
             ;;
         press)
             local keycode

@@ -3,16 +3,19 @@
 #
 #   ./build.sh android record [target] [name] [--seconds N]
 #                             [--script <names>] [--frames <fps>]
+#                             [--fixture [slot]]
 #
 # Records the emulator's or phone's screen with screenrecord to
 # build/recordings/<name>.mp4. With --script the app is relaunched running
-# those debug scripts once the recording runs. With --frames the video is
-# also cut into frames and contact sheets (8 x 6 frames each).
+# those debug scripts once the recording runs; --fixture seeds that launch
+# with a fixture slot's session and clock, as debug does. With --frames the
+# video is also cut into frames and contact sheets (8 x 6 frames each).
 #
 # Provides: do_record
 # Depends on: _use_target, _target_label, _is_target_word, _app_id,
 #             _app_installed, _am_start (build-device.sh, build-lifecycle.sh)
-# Depends on: _script_extras (build-debug.sh), _lock_take (build-lock.sh)
+# Depends on: _script_extras, _fixture_extras (build-debug.sh),
+#             _lock_take (build-lock.sh)
 # Depends on: _sanitize_script_names (shared/scripts.sh),
 #             _record_frames (shared/record-frames.sh)
 
@@ -25,6 +28,7 @@ _record_usage() {
     cat <<'EOF'
 Usage: ./build.sh android record [emulator|device|<serial>] [name] [--seconds N]
                                  [--script <names>] [--frames <fps>]
+                                 [--fixture [slot]]
 
   Record the emulator's or phone's screen to build/recordings/<name>.mp4,
   at most 1920 pixels on the long side (884x1920 on Turn_Parity). The path
@@ -40,10 +44,17 @@ Usage: ./build.sh android record [emulator|device|<serial>] [name] [--seconds N]
     --frames <fps>     Also cut the video into frames at this rate, into
                        build/recordings/<name>/frame_NNN.png, plus contact
                        sheets of 48 frames each (sheet_NN.png) to read at once.
+    --fixture [slot]   With --script: seed the launch with a new session of the
+                       fixture slot (default AGENT_SLOT, else 1) and its reset
+                       instant as TURN_CLOCK, as debug --fixture does.
+
+  ANDROID_LAUNCH_ARGS reaches the scripted launch too, for example
+  "--es TURN_CLOCK 2026-11-17T23:47:43Z" for the clock of iOS's reference films.
 
 Examples:
     ./build.sh android record emulator lens_switch --seconds 6 --frames 10
     ./build.sh android record deck_open --script deck_tour --seconds 20 --frames 5
+    ./build.sh android record motion_deck --script motion_tour --fixture 8 --seconds 30
 EOF
 }
 
@@ -110,16 +121,33 @@ _record_launch_scripts() {
     _reverse_server_port
     _script_extras "$names" true
     echo "  running debug script(s): $names"
-    _am_start "$app_id" "${_SCRIPT_EXTRAS[@]}"
+    _am_start "$app_id" "${_SCRIPT_EXTRAS[@]}" ${_FIXTURE_EXTRAS[@]+"${_FIXTURE_EXTRAS[@]}"}
 }
 
 do_record() {
-    local target="" name="" seconds="$RECORD_DEFAULT_SECONDS" scripts="" fps=""
+    local target="" name="" seconds="$RECORD_DEFAULT_SECONDS" scripts="" fps="" fixture=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --seconds) seconds="${2:-}"; shift 2 ;;
-            --script) scripts="${2:-}"; shift 2 ;;
-            --frames) fps="${2:-}"; shift 2 ;;
+            --seconds | --script | --frames)
+                if [[ $# -lt 2 || "$2" == --* ]]; then
+                    echo "✗ $1 needs a value."
+                    return 1
+                fi
+                case "$1" in
+                    --seconds) seconds="$2" ;;
+                    --script) scripts="$2" ;;
+                    --frames) fps="$2" ;;
+                esac
+                shift 2
+                ;;
+            --fixture)
+                fixture="${AGENT_SLOT:-1}"
+                if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+                    fixture="$2"
+                    shift
+                fi
+                shift
+                ;;
             -h|--help|help) _record_usage; return 0 ;;
             -*) echo "✗ Unknown option: $1"; _record_usage; return 1 ;;
             *)
@@ -152,9 +180,19 @@ do_record() {
         echo "⚠ --script ignored: set TOOLKIT_DEBUG_SCRIPTS=true in build.properties to enable debug scripts."
         scripts=""
     fi
+    if [[ -n "$fixture" && -z "$scripts" ]]; then
+        echo "✗ --fixture seeds the scripted launch; it needs --script."
+        return 1
+    fi
 
     _lock_take emulator || return 1
     _use_target "$target" || return 1
+
+    # The session is fetched before the recording starts: it takes a few seconds.
+    _FIXTURE_EXTRAS=()
+    if [[ -n "$fixture" ]]; then
+        _fixture_extras "$fixture" || return 1
+    fi
 
     local dir="${PROJECT_ROOT}/build/recordings"
     mkdir -p "$dir"

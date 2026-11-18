@@ -27,6 +27,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `build-doctor.sh` | `doctor` |
 | `build-sync.sh` | `sync`, and the parity gate in `build` and `lint` |
 | `build-setup.sh` | `setup` |
+| `tests/args_test.sh` | Argument parsing of `debug`, `record`, `ui`, `see`, `screenshot` and `screenshots collect`, and the fixture's stale-app check, against a fake adb. Run it with `bash toolkit/android/tests/args_test.sh` |
 
 `toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `logfmt.sh` (`--level`), `scripts.sh` (script names and the check summary of `debug`), `vision.sh`, and `parity/` (the extractors and `parity.py` behind `sync`).
 
@@ -124,7 +125,9 @@ Gradle's output goes to `build/logs/gradle-<command>.log`. On failure the toolki
 | `debug [target] [--cat] [--level] [--script <names>] [--no-build] [--timeout N] [--fixture [slot]]` | Below. |
 | `signin [target] [email code]` / `signout [target]` | `debug <target> --no-build --script sign_in` or `sign_out`; the target defaults to `emulator`. The login comes from `SCRIPT_ENV_TURN_LOGIN_EMAIL` and `_CODE`, or the two arguments. |
 
-`--fixture [slot]` (slot from `AGENT_SLOT`, else 1) runs `./build.sh fixture session <slot>` first, because a refresh token works once, then passes `FIXTURE_SLOT_<slot>_REFRESH_TOKEN` and `FIXTURE_SLOT_<slot>_CLOCK` from `build.properties.local` as the extras `TURN_DEBUG_REFRESH_TOKEN` and `TURN_CLOCK`.
+`--fixture [slot]` (slot from `AGENT_SLOT`, else 1) runs `./build.sh fixture session <slot>` first, because a refresh token works once, then passes `FIXTURE_SLOT_<slot>_REFRESH_TOKEN` and `FIXTURE_SLOT_<slot>_CLOCK` from `build.properties.local` as the extras `TURN_DEBUG_REFRESH_TOKEN` and `TURN_CLOCK`. The app keeps the slot and reset instant it was seeded with in `files/toolkit-fixture-seed`. When they differ from the slot's now (the slot was reset, or another slot seeded the app), or the app was never seeded, the toolkit runs `pm clear` first, so the app drops the old account's keys, and grants the runtime permissions it had again. Builds that aren't debuggable, and an app not installed yet, are left alone.
+
+`TURN_CLOCK` (an ISO 8601 instant) starts the debug build's `AppClock` at that instant, so frames show the same relative times on any day. `--fixture` passes the slot's reset instant. For other launches, `ANDROID_LAUNCH_ARGS="--es TURN_CLOCK 2026-11-17T23:47:43Z"` does what `IOS_LAUNCH_ARGS="-TURN_CLOCK 2026-11-17T23:47:43Z"` does on iOS, for every launch of `debug`, `record`, `launch` and `install`; it comes after the other extras, so it wins over the fixture's clock.
 
 ### debug
 
@@ -153,19 +156,21 @@ The target and the flags come in any order. A second target or an unknown flag s
 | `screenshot [target] [name]` | Saves the screen to `build/screenshots/<name>.png` (default `turn_<date>-<time>.png`), says which device it came from, and prints the absolute path last. |
 | `screenshots collect [target]` | Copies the PNGs debug scripts saved in the app's `files/DebugScreenshots` (through `run-as`, or for builds that aren't debuggable from `/sdcard/Android/data/<app>/files/DebugScreenshots`) into `build/screenshots/`. Prints each path, then `✓ Collected N screenshot(s)`. Same names overwrite. |
 | `see [target] [--focus "<question>"]` | Captures the screen and describes it with the vision model (`toolkit/shared/vision.sh`). For models that can't read images. |
-| `record [target] [name] [--seconds N] [--script <names>] [--frames <fps>]` | Records with `screenrecord` to `build/recordings/<name>.mp4`, at most 180 s (screenrecord's limit). Encoders refuse the full 1206x2622 screen, so the video is scaled to 1920 pixels on the long side (884x1920), same aspect. `--script` relaunches the app with the scripts once recording runs, without the marker. `--frames` cuts frames and 8 x 6 contact sheets into `build/recordings/<name>/`, as on iOS. Ctrl-C stops early and keeps the video. |
+| `record [target] [name] [--seconds N] [--script <names>] [--frames <fps>] [--fixture [slot]]` | Records with `screenrecord` to `build/recordings/<name>.mp4`, at most 180 s (screenrecord's limit). Encoders refuse the full 1206x2622 screen, so the video is scaled to 1920 pixels on the long side (884x1920), same aspect. `--script` relaunches the app with the scripts once recording runs, without the marker. `--fixture` (with `--script`) seeds that launch as `debug --fixture` does, fetching the session before the recording starts. `--frames` cuts frames and 8 x 6 contact sheets into `build/recordings/<name>/`, as on iOS. Ctrl-C stops early and keeps the video. Unlike `debug`, it neither builds nor installs. |
 | `ui tap <x> <y>` | Taps at dp. |
 | `ui tap --id <id>` | Taps the element with that resource id. Compose test tags appear as resource ids when the app sets `testTagsAsResourceId = true` on its root. |
 | `ui tap --label <text>` | Taps the first element whose text or content description matches, exactly first, then as a substring. |
 | `ui swipe <x1> <y1> <x2> <y2>` | Drags between two points in dp over 300 ms. |
 | `ui swipe up\|down\|left\|right` | A full-screen swipe, with the same start and end points as iOS. |
-| `ui type <text>` | Types into the focused field. |
+| `ui type <text>` | Types into the focused field. ASCII only: `adb shell input text` can't type other characters, so it refuses them. |
 | `ui press home\|back\|lock` | Presses a button. `back` exists only on Android. |
 | `ui describe [name]` | Prints the view tree, one line per node (`class \| 'label' \| id=... \| x y w h` in dp), and saves it to `build/screenshots/<name>-ui.txt`. |
 
 Every `ui` action except `describe` takes a screenshot afterwards and prints its path last. `--no-shot` skips it; `--delay <ms>` changes the wait before it (700 by default).
 
 `ui` reads the screen through `uiautomator dump`, which sees what the accessibility tree sees. Taps and swipes go through `adb shell input`, scaled from dp to pixels with the device's density.
+
+A dump fails while an endless animation keeps the screen from going idle. After a failed dump, `ui` broadcasts `<app id>.HOLD_MOTION` with `--ez hold true` to the app, tries again three times 500 ms apart, then sends `hold false`. The debug build's receiver pauses the app's own endless transitions while held; a build without one ignores the broadcast.
 
 ### sentry
 

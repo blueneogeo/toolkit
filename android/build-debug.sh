@@ -6,7 +6,7 @@
 #
 # Provides: _android_logs, _android_debug, _sign_in_or_out
 # Depends on: _use_target, _app_id, _app_pid, _install_app, _am_start,
-#             _reverse_server_port, _find_apk (build-lifecycle.sh)
+#             _app_installed, _reverse_server_port, _find_apk (build-lifecycle.sh)
 # Depends on: do_build (build-gradle.sh), _lock_take (build-lock.sh)
 # Depends on: _level_grep (shared/logfmt.sh), _sanitize_script_names,
 #             _note_script_line, _script_summary (shared/scripts.sh)
@@ -207,7 +207,59 @@ _fixture_extras() {
     fi
     _FIXTURE_EXTRAS=(--es TURN_DEBUG_REFRESH_TOKEN "$token")
     [[ -n "$clock" ]] && _FIXTURE_EXTRAS+=(--es TURN_CLOCK "$clock")
+    _fixture_clear_stale_app "$slot" "$clock"
     return 0
+}
+
+# The slot and reset instant the app was last seeded with. The stamp lives in
+# the app's own data, so pm clear and uninstall remove it with the rest.
+FIXTURE_STAMP_FILE="${FIXTURE_STAMP_FILE:-files/toolkit-fixture-seed}"
+
+_fixture_seeded() {
+    "$ADB" -s "$SERIAL" shell "run-as $1 cat $FIXTURE_STAMP_FILE 2>/dev/null" 2>/dev/null | tr -d '\r' || true
+}
+
+# Runtime permissions the app holds, one per line.
+_granted_runtime_permissions() {
+    "$ADB" -s "$SERIAL" shell dumpsys package "$1" 2>/dev/null | tr -d '\r' | awk '
+        /runtime permissions:/ { inside = 1; next }
+        inside && /^ *[A-Za-z0-9_.]+: granted=/ {
+            if ($0 ~ /granted=true/) { line = $0; sub(/^ */, "", line); sub(/:.*/, "", line); print line }
+            next
+        }
+        inside { inside = 0 }'
+}
+
+# A slot reset since the app last ran leaves the app holding the old account's
+# keys, and another slot's session leaves another account's. Either way the
+# app's data is cleared before the new session is seeded; the permissions it
+# had are granted again. Only debuggable builds can be read with run-as; an app
+# that isn't installed yet has nothing to clear.
+_fixture_clear_stale_app() {
+    local slot="$1" clock="$2" app_id seeded wanted
+    _debuggable_config || return 0
+    app_id=$(_app_id 2>/dev/null) || return 0
+    _app_installed "$app_id" || return 0
+    wanted="$slot $clock"
+    seeded=$(_fixture_seeded "$app_id")
+    if [[ "$seeded" != "$wanted" ]]; then
+        if [[ -z "$seeded" ]]; then
+            echo "→ The app wasn't seeded from a fixture slot: clearing its data"
+        else
+            echo "→ The app holds slot ${seeded%% *} as reset at ${seeded#* }: clearing its data"
+        fi
+        local granted permission
+        granted=$(_granted_runtime_permissions "$app_id")
+        if ! "$ADB" -s "$SERIAL" shell pm clear "$app_id" 2>/dev/null | tr -d '\r' | grep -q Success; then
+            echo "⚠ pm clear failed; the app keeps its data."
+            return 0
+        fi
+        for permission in $granted; do
+            "$ADB" -s "$SERIAL" shell pm grant "$app_id" "$permission" >/dev/null 2>&1 || true
+        done
+    fi
+    _run_as "$app_id" "mkdir -p files && echo $(_device_quote "$wanted") > $FIXTURE_STAMP_FILE" \
+        || echo "⚠ Could not write the fixture stamp with run-as."
 }
 
 _android_debug() {
@@ -279,6 +331,12 @@ _android_debug() {
     _install_app || return 1
     _reverse_server_port
 
+    # The fixture first: a stale app's data is cleared before the marker is.
+    _FIXTURE_EXTRAS=()
+    if [[ -n "$fixture" ]]; then
+        _fixture_extras "$fixture" || return 1
+    fi
+
     local use_marker=false
     _SCRIPT_EXTRAS=()
     if [[ -n "$script_names" ]]; then
@@ -289,11 +347,6 @@ _android_debug() {
         else
             _script_extras "$script_names" true
         fi
-    fi
-
-    _FIXTURE_EXTRAS=()
-    if [[ -n "$fixture" ]]; then
-        _fixture_extras "$fixture" || return 1
     fi
 
     local since fifo logcat_pid
