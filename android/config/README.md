@@ -10,7 +10,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 
 | File | Holds |
 |---|---|
-| `build.sh` | Settings, `--device` and `--config`, dispatch, usage |
+| `build.sh` | Settings, `--device` and `--config`, dispatch, usage, `<command> --help` |
 | `build-gradle.sh` | The JDK, the Gradle wrapper, `build`, `clean`, `test`, `lint`, `format` |
 | `build-lint.sh` | The grep gates (`do_android_arch_checks`) and the project's `lint.sh` hook |
 | `detekt-rules/` | Turn's detekt rules (rule set `turn`), and the fixture tests of every gate |
@@ -27,9 +27,13 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `build-doctor.sh` | `doctor` |
 | `build-sync.sh` | `sync`, and the parity gate in `build` and `lint` |
 | `build-setup.sh` | `setup` |
+| `build-profile.sh` | `profile`, `benchmark` |
+| `build-icons.sh` | `icons` |
+| `build-transcription-bench.sh` | `transcription-bench` |
 | `tests/args_test.sh` | Argument parsing of `debug`, `record`, `ui`, `see`, `screenshot` and `screenshots collect`, and the fixture's stale-app check, against a fake adb. Run it with `bash toolkit/android/tests/args_test.sh` |
+| `tests/help_test.sh` | Every command's `--help`, and that its flags are the ones this file and the usage list name. Run it with `bash toolkit/android/tests/help_test.sh` |
 
-`toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `logfmt.sh` (`--level`), `scripts.sh` (script names and the check summary of `debug`), `vision.sh`, and `parity/` (the extractors and `parity.py` behind `sync`).
+`toolkit/shared` provides what iOS uses too: `record-frames.sh` (frames and contact sheets), `compare.sh` (`compare`), `logfmt.sh` (`--level`), `scripts.sh` (script names and the check summary of `debug`), `vision.sh`, and `parity/` (the extractors and `parity.py` behind `sync`).
 
 ## Settings
 
@@ -67,10 +71,13 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `TURN_ROOT` | none | The leading platform's repository; `sync` reads iOS from its commits, read-only |
 | `TOOLKIT_DEBUG_TIMEOUT` | `600` | Seconds a scripted `debug` waits for `DEBUG_SESSION_ENDED` |
 | `TOOLKIT_FIXTURE_SESSION_CMD` | `./build.sh fixture session` | Run with the slot before `--fixture` launches |
+| `ANDROID_TRACE_PROCESSOR` | the one in androidx.benchmark's benchmark-common in the Gradle cache | The `trace_processor_shell` that `profile` runs on the device |
+| `COMPARE_IOS_REFERENCE` | none | The iOS frames `compare` reads when `--ios` is left out |
 | `TOOLKIT_FIXTURE_GRANTS` | empty | Runtime permissions granted before every `--fixture` launch (space-separated), so no system dialog pauses an unwatched script run |
 | `TOOLKIT_OVERNIGHT_DIR` | `<main checkout>/../output/overnight` | Locks, night folders |
 | `TOOLKIT_NIGHT_DATE` | the newest night with a queue | Fixes which night folder `blocker add` and `doctor --watch` use |
 | `TOOLKIT_LOCK_TIMEOUT` | `1200` | Seconds a command waits for a lock |
+| `TOOLKIT_EMULATOR_LOCK` | none | A name for a separate emulator lock, `emulator-<name>`: commands take it in place of `emulator`. For an emulator nobody else uses, for example one kept open for a person to look at |
 | `TOOLKIT_WORKTREE_DIR` | `<parent>-<checkout>-work` | Where package worktrees go |
 | `TOOLKIT_WORKTREE_BRANCH_PREFIX` | `pkg/` | Branch name before the package name |
 | `TOOLKIT_WORKTREE_COPY` | `local.properties build.properties.local` | Gitignored files copied into a new worktree |
@@ -97,6 +104,8 @@ A lone argument to `screenshot` or `record` is the target only when it is one of
 
 ## Commands
 
+`./build.sh android <command> --help` prints a command's help: its own usage text where it has one (`doctor`, `record`, `ui`, `sync`, `lock`, `blocker`, `night`, `worktree`, `icons`, `transcription-bench`, `profile`, `benchmark`, `compare`, `emulator`), else its rows and section of this file.
+
 ### Build
 
 | Command | Does |
@@ -105,7 +114,7 @@ A lone argument to `screenshot` or `record` is the target only when it is one of
 | `build` | `ktlintFormat`, then `ktlintCheck` and `detekt` (each when the Gradle build applies the plugin) and the arch checks, then `:app:assemble<Type>`. Prints `✓ Format passed`, `✓ Lint passed`, `✓ Build complete`. |
 | `clean` | `gradle clean` and removes `build/` (screenshots, recordings, logs). |
 | `test [filter] [timeout] [--no-build\|--build-only]` | `:app:test<Type>UnitTest --rerun`. The filter is a class name (`FeedLoadTests`) or `Class/method`. Stops Gradle after the timeout (120 s). Prints the verdict from the JUnit reports: `✓ 12 tests passed` or `✗ 2 of 12 tests failed:` and one line per failure. `--no-build` is accepted; Gradle compiles only what changed anyway. Asks the server first when `TOOLKIT_SERVER_ENABLED=true`. `--build-only` compiles the tests (`:app:compile<Type>UnitTestKotlin`) without running them and without asking the server, and prints `✓ Tests build`. |
-| `test instrumented [filter] [timeout] [--build-only]` | `:app:connected<Type>AndroidTest` on one device: the `--device` selector, else the running emulator (booted when nothing is connected), else the one phone. A filter `Class` or `Class/method` is looked up under `src/androidTest` for its package and passed as the runner's `class` argument; a dotted name is passed as it is. Same timeout and verdict as `test`, from the reports in `build/outputs/androidTest-results/connected/`. `--build-only` assembles the test APK (`:app:assemble<Type>AndroidTest`). Takes the emulator lock. |
+| `test instrumented [filter] [timeout] [--build-only] [--keep-installed]` | `:app:connected<Type>AndroidTest` on one device: the `--device` selector, else the running emulator (booted when nothing is connected), else the one phone. A filter `Class` or `Class/method` is looked up under `src/androidTest` for its package and passed as the runner's `class` argument; a dotted name is passed as it is. Same timeout and verdict as `test`, from the reports in `build/outputs/androidTest-results/connected/`. `--build-only` assembles the test APK (`:app:assemble<Type>AndroidTest`). `--keep-installed` leaves the app and its data on the device after the run, for a test that checks what a second run in a new process finds. Takes the emulator lock. |
 | `lint` | The `build` checks, then Android Lint (`:app:lint<Type>`). |
 | `unused` | Assembles the profile build (R8) and lists the app's classes and members in `build/outputs/mapping/profile/usage.txt`; fails when there are any. iOS: Periphery. |
 | `analyze` | Android Lint with compose-lints and `-Pturn.lint.strict=true`, which makes every warning an error. |
@@ -158,6 +167,7 @@ The target and the flags come in any order. A second target or an unknown flag s
 | `screenshots collect [target]` | Copies the PNGs debug scripts saved in the app's `files/DebugScreenshots` (through `run-as`, or for builds that aren't debuggable from `/sdcard/Android/data/<app>/files/DebugScreenshots`) into `build/screenshots/`. Prints each path, then `✓ Collected N screenshot(s)`. Same names overwrite. |
 | `see [target] [--focus "<question>"]` | Captures the screen and describes it with the vision model (`toolkit/shared/vision.sh`). For models that can't read images. |
 | `record [target] [name] [--seconds N] [--script <names>] [--frames <fps>] [--fixture [slot]]` | Records with `screenrecord` to `build/recordings/<name>.mp4`, at most 180 s (screenrecord's limit). Encoders refuse the full 1206x2622 screen, so the video is scaled to 1920 pixels on the long side (884x1920), same aspect. `--script` relaunches the app with the scripts once recording runs, without the marker. `--fixture` (with `--script`) seeds that launch as `debug --fixture` does, fetching the session before the recording starts. `--frames` cuts frames and 8 x 6 contact sheets into `build/recordings/<name>/`, as on iOS. Ctrl-C stops early and keeps the video. Unlike `debug`, it neither builds nor installs. |
+| `compare <scripts> [target] [--fixture [slot\|standard]] [--no-build] [--ios <dir>] [--android <dir>] [--out <dir>] [--timeout N]` | Runs each debug script, collects its frames and writes `build/compare/<run>/index.html`: the iOS and Android frame of each frame name side by side, a frame missing on either side marked, and both sides' `[scriptor]` and `[perf]` lines aligned with failed checks highlighted. The iOS side is read from frames already made (`--ios`, else `COMPARE_IOS_REFERENCE`), a reference run on slot 8; compare doesn't run the simulator. `--android` takes frames already collected, and nothing runs. `build/compare/latest` points at the newest run. |
 | `ui tap <x> <y>` | Taps at dp. |
 | `ui tap --id <id>` | Taps the element with that resource id. Compose test tags appear as resource ids when the app sets `testTagsAsResourceId = true` on its root. |
 | `ui tap --label <text>` | Taps the first element whose text or content description matches, exactly first, then as a substring. |
@@ -167,11 +177,26 @@ The target and the flags come in any order. A second target or an unknown flag s
 | `ui press home\|back\|lock` | Presses a button. `back` exists only on Android. |
 | `ui describe [name]` | Prints the view tree, one line per node (`class \| 'label' \| id=... \| x y w h` in dp), and saves it to `build/screenshots/<name>-ui.txt`. A tappable node with no text or content description, in itself or below it, ends in `\| no label`: TalkBack has nothing to read for it. |
 
+### ui
+
 Every `ui` action except `describe` takes a screenshot afterwards and prints its path last. `--no-shot` skips it; `--delay <ms>` changes the wait before it (700 by default).
 
 `ui` reads the screen through `uiautomator dump`, which sees what the accessibility tree sees. Taps and swipes go through `adb shell input`, scaled from dp to pixels with the device's density.
 
 A dump fails while an endless animation keeps the screen from going idle. After a failed dump, `ui` broadcasts `<app id>.HOLD_MOTION` with `--ez hold true` to the app, tries again three times 500 ms apart, then sends `hold false`. The debug build's receiver pauses the app's own endless transitions while held; a build without one ignores the broadcast.
+
+### Performance
+
+| Command | Does |
+|---|---|
+| `profile [target] [--script <names>] [--seconds N] [--render] [--name <label>] [--gfxinfo] [--main] [--until <seconds>] [--callers <function>] [--trace <file>] [--fixture [slot]]` | Records a Perfetto trace of the installed app for N seconds (default 40) into `build/traces/` and prints the FrameMonitor lines, CPU time per thread, the heaviest functions and the app's own code, as `ios profile` does. `--script` launches with those debug scripts, `--fixture` seeds that launch. `--render` adds frame times and missed deadlines, `--gfxinfo` the frame counts of `dumpsys gfxinfo`. `--main` keeps only the main thread, with its busy time per quarter second. `--until` keeps the first seconds (a launch). `--callers` shows what was on the stack whenever a matching function ran. `--trace` summarises a recorded `.pftrace` again without recording. Callstacks need a profile or debug build. It installs only when the built APK differs from the installed one. For a first launch after an install: `--config profile install --no-launch`, then `--config profile profile --until 5`. |
+| `benchmark [target] [Class[#method]] [--build-only] [--fixture [slot]]` | Builds the profile build and the `benchmark` module and runs the Macrobenchmarks: `StartupBenchmark` (cold launch) and `DeckSwipeBenchmark` (`deck_swipe_perf`'s frames), or the one named. `--fixture` hands them a fresh session of the fixture slot. `--build-only` builds without a device, and fills the Gradle cache with the `trace_processor_shell` that `profile` uses. Numbers from the emulator only show regressions; measure on a phone. |
+
+### icons
+
+| Command | Does |
+|---|---|
+| `icons [generate\|check\|scan\|sheet]` | `generate` (the default) downloads the Material Symbols that `icons.toml` maps the iOS SF Symbols to, writes `res/drawable/ic_*.xml` and `view/generated/TurnIcons.kt`, and deletes drawables nothing maps. It fails when an SF name in the iOS sources isn't in `icons.toml`. `check` does the same checks offline, with every `TurnIcon("...")` call in the app; `lint` runs it. `scan [--commit <c>]` lists the SF names in the iOS sources with their sites, `!` marking the unmapped ones. `sheet [--out <dir>]` writes the review page, SF and Material side by side. |
 
 ### sentry
 
@@ -181,14 +206,16 @@ A dump fails while an endless animation keeps the screen from going idle. After 
 
 | Command | Does |
 |---|---|
-| `lock <gradle\|emulator> -- <command...>` | Runs the command holding a lock shared by every checkout and worktree. gradle has two holders, emulator one. Waits up to 20 minutes, then fails and suggests a `lock-timeout` blocker. |
+| `lock <gradle\|emulator> -- <command...>` | Runs the command holding a lock shared by every checkout and worktree. gradle has two holders, emulator one. Waits up to 20 minutes, then fails and suggests a `lock-timeout` blocker. With `TOOLKIT_EMULATOR_LOCK=<name>` the emulator lock is `emulator-<name>`, shared only by commands run with the same setting. |
 | `lock status` | Who holds each lock, and stale ones. |
 | `night init <date> [--ios-commit <sha>] [--exclude "<IDs>"] [--force]` | Creates `<overnight>/<date>/` with empty `blockers.jsonl`, `progress.jsonl`, `notifications.jsonl`, the `down/` folder, and `queue.json` with every package of waves 1 to 4 in `doc/packages.md`, all `waiting`. Rows named ", phase 2" or ", only if" are left out; dependencies outside the queue (wave 0) are dropped. Keeps an existing `queue.json` unless `--force`. |
-| `blocker add --kind <kind> --summary "<text>" [...]` | Appends one JSON line to the night's `blockers.jsonl` (`blockers.md` 6.2) and prints its path. Fills in the time, agent, worktree, branch and package. `blocker --help` lists the kinds and options. |
+| `blocker add --kind <kind> --summary "<text>" [...]` | Appends one JSON line to the night's `blockers.jsonl` (`blockers.md` 6.2) and prints its path. Fills in the time, agent, worktree, branch and package. More fields: `--severity blocks-step\|blocks-package\|blocks-all\|degraded` (default `blocks-step`), `--needs` (what a person must do), `--evidence <path>`, `--tried` (once per attempt), `--switched-to`, `--package`, `--agent`, and `--status resolved` when it clears. `blocker --help` lists the kinds. |
 | `worktree new <package> [--from <ref>]` | Below. |
 | `worktree remove <package> [--force]` | Below. |
 | `worktree list` | The package worktrees and their branches. |
 | `doctor [--quick] [--json] [--watch [minutes]]` | Below. |
+
+### lock
 
 Commands take the locks themselves: Gradle calls the gradle lock; `install`, `launch`, `uninstall`, `debug`, `record`, `screenshot`, `screenshots collect`, `see`, `ui`, `push`, `test instrumented`, `watch` and every `emulator` command except `status` and `create` the emulator lock (after building, so no one holds the emulator while waiting for Gradle). Commands run under `lock` reuse the lock they hold (`TOOLKIT_LOCKS_HELD`), so one lock covers a sequence:
 
@@ -215,9 +242,15 @@ The parity map compares the leading platform's Swift with the project's Kotlin, 
 
 The extractors build on first use into `build/parity-tools/`: the Swift one with swift-syntax (SwiftPM, about two minutes, offline once the package is in SwiftPM's cache), the Kotlin one with the Kotlin compiler's PSI from the Gradle cache, under the gradle lock. Results are cached per git blob in `build/parity/cache/`, so a warm map takes under a second.
 
+The map reads the JVM tests (`android_tests` in `parity.toml`) and the instrumented ones (`android_instrumented_tests`). An iOS test file maps to the instrumented file when only that one exists. An abstract test base, the counterpart of an iOS `XCTestCase` subclass the tests inherit from, counts as a test class with no methods.
+
 `parity.toml` holds the rules: source roots, tiers, how file names and enum cases change, split and moved files, renames, the type map for framework types, and the iOS-only and Android-only lists with their reasons.
 
 ### transcription-bench
+
+| Command | Does |
+|---|---|
+| `transcription-bench [target] [push\|run\|report\|clean] [--corpus <dir>] [--engines <list>] [--prompts <list>] [--clips <ids>] [--baseline <file>] [--results <file>] [--timeout <s>] [--json]` | Runs a corpus of clips through the app's transcription engines and prints the scores per engine and language. `--engines` is `whisper` (default), `google` or both; `--prompts` is `app`, `none` or both (default). `--results` names a result file for `report`, once per phone (default the newest). `--timeout` is how long `run` waits for the script (default 14400 s). `--json` prints the report as JSON. |
 
 The transcription quality test's host side (Turn's `spec/recording.md` 6.6). `push` copies the clips that the corpus's `manifest.json` names (default `build/transcription-corpus`, with human reference lines per clip) into the debug app's `files/transcription-bench/` with `run-as`, and a list of ids and files without the references. `run` launches the debug script `TRANSCRIPTION_BENCH_SCRIPT` (`transcription_benchmark`) with `--prompts` and `--clips` as launch extras and pulls its `results.json` into `build/transcription-bench/<serial>-<time>.json`. `report` scores result files with `transcription_bench.py`: WER after normalising (lower case, no accents or punctuation, numbers spelled out), the switching clips' WER and words in the wrong language, caption start error, words on negative clips, real-time factor, first load, memory and thermal status, with the pass marks against `--baseline`. Without a step it does all three. `clean` removes the folder from the app, the benchmark's own model copy included. Its tests: `python3 -B toolkit/android/tests/transcription_bench_test.py`.
 
