@@ -35,6 +35,7 @@ source "$SCRIPT_DIR/build-doctor.sh"
 source "$SCRIPT_DIR/build-sync.sh"
 source "$SCRIPT_DIR/build-setup.sh"
 source "$SCRIPT_DIR/build-icons.sh"
+source "$SCRIPT_DIR/build-transcription-bench.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/android.pid"
 TEST_TIMEOUT=120
@@ -189,6 +190,12 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
     icons [generate|check|scan|sheet]
                        Material Symbols drawables from icons.toml ('./build.sh android icons help')
 
+  Quality tests:
+    transcription-bench [target] [push|run|report|clean] [--corpus <dir>] [--baseline <file>] [...]
+                       Run a corpus of clips through the app's transcription engine and print
+                       WER, switching, caption timing, speed, memory and heat per engine and
+                       language ('./build.sh android transcription-bench help')
+
   Overnight work:
     lock <gradle|emulator> -- <command...>
                        Run a command holding a shared lock ('./build.sh android lock --help')
@@ -309,6 +316,7 @@ _dispatch() {
         night)       shift; do_night "$@" ;;
         sync)        shift; do_sync "$@" ;;
         icons)       shift; do_icons "$@" ;;
+        transcription-bench) shift; do_transcription_bench "$@" ;;
         help|--help|-h|"") usage ;;
         *)
             echo "✗ Unknown android command: $1"
