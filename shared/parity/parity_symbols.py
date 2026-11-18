@@ -155,11 +155,22 @@ def android_symbols(entry):
                               detail=view.get("kind", ""), key=view.get("key", "")))
     for script in entry.get("debug_scripts", []):
         symbols.append(Symbol("script", "", script["name"], path, script.get("line", 0), detail=script.get("type", "")))
-    for test in entry.get("tests", []):
+    tests = list(entry.get("tests", []))
+    if is_test_source(path):
+        # An abstract base, iOS's XCTestCase subclass that the tests inherit from, counts as a test class without @Test methods.
+        named = {test["class"] for test in tests}
+        tests += [{"class": info["name"], "methods": []} for info in entry.get("types", [])
+                  if "abstract" in info.get("modifiers", []) and info.get("name") and info["name"] not in named]
+    for test in tests:
         symbols.append(Symbol("test", "", test["class"], path))
         for method in test.get("methods", []):
             symbols.append(Symbol("test", test["class"], method, path))
     return symbols
+
+
+def is_test_source(path):
+    """A file of the JVM tests or the instrumented ones (Gradle's src/test and src/androidTest)."""
+    return "/src/test/" in f"/{path}" or "/src/androidTest/" in f"/{path}"
 
 
 def kotlin_function(fn, owner, path):

@@ -84,7 +84,8 @@ def default_status(config, ios_paths, android_present):
 
 
 def all_android_sources(config):
-    roots = [config.android_root, config.android_debug_tools, config.android_debug, config.android_tests]
+    roots = [config.android_root, config.android_debug_tools, config.android_debug, config.android_tests,
+             config.android_instrumented_tests]
     paths = []
     for root in roots:
         if not root:
