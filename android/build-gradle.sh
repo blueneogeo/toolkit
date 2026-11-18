@@ -388,9 +388,14 @@ do_test() {
     local task=":$ANDROID_MODULE:test${variant}UnitTest"
     local args=("$task" --rerun)
     if [[ -n "$_TEST_FILTER" ]]; then
-        local pattern="${_TEST_FILTER//\//.}"
-        [[ "$pattern" == *"*"* || "$pattern" == *.*.* ]] || pattern="*.$pattern"
-        args+=(--tests "$pattern")
+        # Several classes run in one Gradle call when the filter names them with commas.
+        local filters filter pattern
+        IFS=',' read -ra filters <<< "$_TEST_FILTER"
+        for filter in "${filters[@]}"; do
+            pattern="${filter//\//.}"
+            [[ "$pattern" == *"*"* || "$pattern" == *.*.* ]] || pattern="*.$pattern"
+            args+=(--tests "$pattern")
+        done
         echo "  Running tests filtered by '$_TEST_FILTER' (timeout: ${_TEST_TIMEOUT}s)..."
     else
         echo "  Running tests... (timeout: ${_TEST_TIMEOUT}s)"
