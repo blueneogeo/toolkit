@@ -128,7 +128,7 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        the tests without running them (and without the local server)
     test instrumented [filter] [timeout] [--build-only]
                        Run the tests under src/androidTest on the emulator or a phone
-    lint               ktlint, detekt, the parity gate and Android Lint on all sources
+    lint               ktlint, detekt, the token gate, the parity gate and Android Lint on all sources
     format             Auto-format all Kotlin sources with ktlint
     doctor [--quick] [--json] [--watch [minutes]]
                        Check the machine, the SDK, the emulator and the server
