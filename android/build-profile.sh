@@ -434,7 +434,10 @@ _profile_summary() {
     [[ -n "$until" ]] && args+=(--until "$until")
     [[ "$main" == true ]] && args+=(--main)
     [[ "$render" == true ]] && args+=(--render)
-    python3 -I "$SCRIPT_DIR/profile_summary.py" "${args[@]}"
+    local code=0
+    python3 -I "$SCRIPT_DIR/profile_summary.py" "${args[@]}" || code=$?
+    "$ADB" -s "$SERIAL" shell rm -f "$PROFILE_DEVICE_DIR/turn-profile-query.sql" >/dev/null 2>&1 || true
+    return "$code"
 }
 
 # ── Benchmark ───────────────────────────────────────────────────────
