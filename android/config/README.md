@@ -28,6 +28,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `build-sync.sh` | `sync`, and the parity gate in `build` and `lint` |
 | `build-setup.sh` | `setup` |
 | `build-profile.sh` | `profile`, `benchmark` |
+| `build-upload.sh` | `preflight`, `upload`, `promote` |
 | `build-icons.sh` | `icons` |
 | `build-transcription-bench.sh` | `transcription-bench` |
 | `tests/args_test.sh` | Argument parsing of `debug`, `record`, `ui`, `see`, `screenshot` and `screenshots collect`, and the fixture's stale-app check, against a fake adb. Run it with `bash toolkit/android/tests/args_test.sh` |
@@ -59,6 +60,13 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `TOOLKIT_LOGS_ENABLED` | `true` | `logs` and `debug` |
 | `TOOLKIT_SENTRY_ENABLED` | `false` | `sentry` queries, with `SENTRY_ORG` and `ANDROID_SENTRY_PROJECT` |
 | `ANDROID_SENTRY_PROJECT` | none | The Sentry project `sentry` reads |
+| `TOOLKIT_UPLOAD_ENABLED` | `false` | `upload` and `promote` |
+| `DEPLOY_TAG_PREFIX` | `android/v` | The upload tags; the number after it is the versionCode |
+| `ANDROID_PLAY_TRACKS` | `internal` | The tracks an upload ends on, comma-separated. It always goes to `internal` first and is promoted to the others, as `TESTFLIGHT_GROUPS` hands an iOS build on |
+| `ANDROID_PLAY_RELEASE_STATUS` | `completed` | The status of every release `upload` and `promote` make. `draft` while Play still calls the app a draft app |
+| `ANDROID_KEY_ALIAS` | `upload` | The key's alias in the upload keystore |
+| `ANDROID_KEYSTORE_PATH` | none | A keystore file to sign with in place of the keychain's `ANDROID_KEYSTORE`, as `IOS_KEY_PATH` names the App Store key |
+| `ANDROID_DEBUG_TOOLS_PACKAGE` | `<package>.debug` | The package `preflight` and `upload` refuse to find in the release bundle |
 | `ANDROID_EMULATOR_PROFILE` | `pixel_8` | The avdmanager device profile `emulator create` and `setup` use while `ANDROID_EMULATOR_AVD` doesn't exist |
 | `ANDROID_EMULATOR_HARDWARE` | the iPhone 17 Pro's canvas | `config.ini` keys written into that first AVD: `hw.lcd.width=1206 hw.lcd.height=2622 hw.lcd.density=480 hw.ramSize=3072 hw.audioInput=no hw.camera.back=virtualscene hw.camera.front=emulated hw.keyboard=yes PlayStore.enabled=no` and a 1206x2622 skin without a frame |
 | `TOOLKIT_ARCH_CHECKS` | `true` | Runs the grep gates of `build-lint.sh` and the project's `lint.sh` in `build` and `lint`, the token gate and the parity gate |
@@ -111,6 +119,7 @@ A lone argument to `screenshot` or `record` is the target only when it is one of
 | Command | Does |
 |---|---|
 | `setup [--force]` | First-time setup, safe to re-run: accepts the SDK licences (sdkmanager asks you) when none are, installs the missing SDK packages (platform-tools, emulator, the module's `compileSdk`, `ANDROID_BUILD_TOOLS`, `ANDROID_EMULATOR_IMAGE`), makes `ANDROID_EMULATOR_AVD` when it doesn't exist (`emulator create`), writes `sdk.dir` to `local.properties` when it is missing, runs `gradlew --version`, then assembles the app. A re-run finds everything in place and only builds. `--force` runs `clean` before the build. Needs the SDK's command-line tools (`cmdline-tools/latest`). |
+| `bundle` | `:app:bundle<Type>`, and prints the `.aab`'s size and path. |
 | `build` | `ktlintFormat`, then `ktlintCheck` and `detekt` (each when the Gradle build applies the plugin) and the arch checks, then `:app:assemble<Type>`. Prints `✓ Format passed`, `✓ Lint passed`, `✓ Build complete`. |
 | `clean` | `gradle clean` and removes `build/` (screenshots, recordings, logs). |
 | `test [filter] [timeout] [--no-build\|--build-only]` | `:app:test<Type>UnitTest --rerun`. The filter is a class name (`FeedLoadTests`) or `Class/method`. Stops Gradle after the timeout (120 s). Prints the verdict from the JUnit reports: `✓ 12 tests passed` or `✗ 2 of 12 tests failed:` and one line per failure. `--no-build` is accepted; Gradle compiles only what changed anyway. Asks the server first when `TOOLKIT_SERVER_ENABLED=true`. `--build-only` compiles the tests (`:app:compile<Type>UnitTestKotlin`) without running them and without asking the server, and prints `✓ Tests build`. |
@@ -191,6 +200,42 @@ A dump fails while an endless animation keeps the screen from going idle. After 
 |---|---|
 | `profile [target] [--script <names>] [--seconds N] [--render] [--name <label>] [--gfxinfo] [--main] [--until <seconds>] [--callers <function>] [--trace <file>] [--fixture [slot]]` | Records a Perfetto trace of the installed app for N seconds (default 40) into `build/traces/` and prints the FrameMonitor lines, CPU time per thread, the heaviest functions and the app's own code, as `ios profile` does. `--script` launches with those debug scripts, `--fixture` seeds that launch. `--render` adds frame times and missed deadlines, `--gfxinfo` the frame counts of `dumpsys gfxinfo`. `--main` keeps only the main thread, with its busy time per quarter second. `--until` keeps the first seconds (a launch). `--callers` shows what was on the stack whenever a matching function ran. `--trace` summarises a recorded `.pftrace` again without recording. Callstacks need a profile or debug build. It installs only when the built APK differs from the installed one. For a first launch after an install: `--config profile install --no-launch`, then `--config profile profile --until 5`. |
 | `benchmark [target] [Class[#method]] [--build-only] [--fixture [slot]]` | Builds the profile build and the `benchmark` module and runs the Macrobenchmarks: `StartupBenchmark` (cold launch) and `DeckSwipeBenchmark` (`deck_swipe_perf`'s frames), or the one named. `--fixture` hands them a fresh session of the fixture slot. `--build-only` builds without a device, and fills the Gradle cache with the `trace_processor_shell` that `profile` uses. Numbers from the emulator only show regressions; measure on a phone. |
+
+### Play
+
+| Command | Does |
+|---|---|
+| `preflight` | The upload's release bundle (`:app:bundleRelease`, unsigned) and its checks, without uploading: the merged manifest isn't debuggable, and R8's mapping holds no class of `ANDROID_DEBUG_TOOLS_PACKAGE`. As `ios preflight`. |
+| `upload [--dry-run] [--force] "release notes"` | Below. |
+| `promote <track> [--from <track>] ["release notes"]` | Hands the newest release on `internal` (or `--from`) to the track with Gradle Play Publisher's `promoteReleaseArtifact`, with the notes given or else those of the newest upload tag. As `ios testflight <build>`, except that Play promotes a track's release, so it takes no versionCode. |
+
+### upload
+
+1. Doctor, the clean tree, the branch and `origin`, as `ios upload`. The next tag is `DEPLOY_TAG_PREFIX` plus the number of upload tags plus one; that number is the bundle's versionCode (`ANDROID_VERSION_CODE` for Gradle).
+2. Asks before it goes on, unless `--force`. Tags the commit, and pushes the tag when there is an `origin`.
+3. Builds `:app:bundleRelease` signed with the upload key, without the Gradle daemon, then checks it as `preflight` does and verifies its signature with `jarsigner` against the key's SHA-256.
+4. Uploads it to the `internal` track (`publishReleaseBundle`, the notes as `src/release/play/release-notes/en-US/default.txt`, removed after), then promotes it to each other track of `ANDROID_PLAY_TRACKS`.
+5. Annotates the tag with the versionCode, commit, time, tracks and notes, and logs the upload in `.watch/deploy.log`.
+
+`--dry-run` runs steps 1 and 3 and stops: no question, no tag, nothing sent to Play, and uncommitted changes only warn. Without an upload key it signs with a throwaway key it makes in `build/upload/THROWAWAY-dry-run-key-NOT-the-Play-upload-key.p12`, which Play would refuse. With the upload key it gives the signed bundle for the first upload, which Play takes only by hand in Play Console. After that upload, tag its commit `git tag -a android/v1 -m "build: 1 | first upload by hand"`, so the next upload's versionCode is 2.
+
+The secrets come from the environment, else from `keychain()` refs in the project's gitignored `.env.local`, read with `varlock printenv` as the server reads its own:
+
+- `ANDROID_KEYSTORE`: the upload keystore, base64. Written to `build/upload/upload-key.jks` for the build and removed after it. `ANDROID_KEYSTORE_PATH` names a file instead.
+- `ANDROID_KEYSTORE_PASSWORD`: its password, also the key's.
+- `ANDROID_PLAY_JSON_KEY`: the Play service account's JSON key, handed to Gradle Play Publisher as `ANDROID_PUBLISHER_CREDENTIALS` for the publish and promote steps only. The app module keeps the plugin off without it, so no other build reaches Play.
+
+To store them, in the Android folder:
+
+```
+keytool -genkeypair -keystore upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000
+base64 -i upload.jks | tr -d '\n' | pbcopy
+varlock keychain set ANDROID_KEYSTORE --project turn-android --write-to .env.local
+varlock keychain set ANDROID_KEYSTORE_PASSWORD --project turn-android --write-to .env.local
+varlock keychain set ANDROID_PLAY_JSON_KEY --project turn-android --write-to .env.local
+```
+
+Paste the copied keystore at the first `set`, the password at the second and the JSON key file's contents (`tr -d '\n' < key.json | pbcopy`) at the third. Keep `upload.jks` and its password somewhere safe outside the Mac, then delete the file here: Play can reset a lost upload key, but only through its support.
 
 ### icons
 
