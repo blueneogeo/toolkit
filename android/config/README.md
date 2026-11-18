@@ -67,6 +67,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `TURN_ROOT` | none | The leading platform's repository; `sync` reads iOS from its commits, read-only |
 | `TOOLKIT_DEBUG_TIMEOUT` | `600` | Seconds a scripted `debug` waits for `DEBUG_SESSION_ENDED` |
 | `TOOLKIT_FIXTURE_SESSION_CMD` | `./build.sh fixture session` | Run with the slot before `--fixture` launches |
+| `TOOLKIT_FIXTURE_GRANTS` | empty | Runtime permissions granted before every `--fixture` launch (space-separated), so no system dialog pauses an unwatched script run |
 | `TOOLKIT_OVERNIGHT_DIR` | `<main checkout>/../output/overnight` | Locks, night folders |
 | `TOOLKIT_NIGHT_DATE` | the newest night with a queue | Fixes which night folder `blocker add` and `doctor --watch` use |
 | `TOOLKIT_LOCK_TIMEOUT` | `1200` | Seconds a command waits for a lock |
