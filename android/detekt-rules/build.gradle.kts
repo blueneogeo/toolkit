@@ -7,6 +7,17 @@ plugins {
 
 group = "com.sendaturn.lint"
 
+// The jar's name carries a hash of the sources: detekt keeps the rule classes it loaded for as
+// long as the Gradle daemon lives, and a jar under a new name makes it load the new rules.
+version =
+    "0-" +
+    fileTree("src/main")
+        .files
+        .sortedBy { it.path }
+        .fold(0L) { hash, file -> hash * 31 + file.readText().hashCode() + file.name.hashCode() }
+        .toULong()
+        .toString(16)
+
 val detektVersion = "2.0.0-alpha.6"
 
 kotlin {

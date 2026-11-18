@@ -129,7 +129,10 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        the tests without running them (and without the local server)
     test instrumented [filter] [timeout] [--build-only]
                        Run the tests under src/androidTest on the emulator or a phone
-    lint               ktlint, detekt, the parity gate and Android Lint on all sources
+    lint               ktlint, detekt, the grep gates, the parity gate and Android Lint on all sources
+    unused             What R8 removes from the profile build, the app's own code only
+    analyze            Android Lint with compose-lints, every warning an error
+    audit              The lint overrides, then lint, unused and analyze
     format             Auto-format all Kotlin sources with ktlint
     doctor [--quick] [--json] [--watch [minutes]]
                        Check the machine, the SDK, the emulator and the server
@@ -271,6 +274,9 @@ _dispatch() {
         sentry)      shift; _dispatch_sentry "$@" ;;
         test)        shift; do_test "$@" ;;
         lint)        do_lint ;;
+        unused)      do_android_unused ;;
+        analyze)     do_android_analyze ;;
+        audit)       do_android_audit ;;
         format)      do_format ;;
         doctor)      shift; do_doctor "$@" ;;
         logs)        shift; _android_logs "$@" ;;

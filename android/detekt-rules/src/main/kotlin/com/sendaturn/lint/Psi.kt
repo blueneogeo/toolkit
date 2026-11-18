@@ -1,6 +1,5 @@
 package com.sendaturn.lint
 
-import org.jetbrains.kotlin.psi.KtBlockExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtDeclarationWithBody
 import org.jetbrains.kotlin.psi.KtElement
@@ -60,17 +59,8 @@ internal fun KtCallExpression.isPortStub(): Boolean {
     return text.startsWith("\"port:")
 }
 
-/** A function, getter or setter whose whole body is `TODO("port: ...")`. */
-internal fun KtDeclarationWithBody.isPortStubBody(): Boolean {
-    val body = bodyExpression ?: return false
-    val only =
-        if (body is KtBlockExpression) {
-            body.statements.singleOrNull()
-        } else {
-            body
-        }
-    return (only as? KtCallExpression)?.isPortStub() == true
-}
+/** A spine stub: a function, getter or setter that still holds `TODO("port: ...")`, called or in a comment. */
+internal fun KtDeclarationWithBody.isPortStubBody(): Boolean = bodyExpression != null && lines().contains("TODO(\"port:")
 
 /** The text of every source line [element] spans, and of the line above it. */
 internal fun KtElement.linesWithLineAbove(): String {

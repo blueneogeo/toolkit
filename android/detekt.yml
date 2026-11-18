@@ -37,6 +37,10 @@ style:
     active: false # turn > UnusedParameter, which lets the spine's TODO("port: ...") stubs through
   MayBeConstant:
     active: false # SwiftLint has no such rule; constants keep their iOS shape
+  FunctionOnlyReturningConstant:
+    active: false # SwiftLint has no such rule
+  LoopWithTooManyJumpStatements:
+    active: false # SwiftLint has no such rule; loops are ported as iOS writes them
   UnusedPrivateProperty:
     active: false # unused_declaration is an analyzer rule on iOS (the unused command), not part of lint
   UnusedPrivateFunction:
@@ -49,6 +53,10 @@ naming:
     active: false # file names mirror iOS (AppStateSettings.kt holds SettingsState), as ktlint's filename rule
   FunctionNaming:
     ignoreAnnotated: ['Composable']
+    # Swift names kept: Log's private _log, and ByteArray(hexString) for Data(hexString:).
+    excludes: ['**/service/Log.kt', '**/service/PhoneOPRF.kt']
+  TopLevelPropertyNaming:
+    active: false # iOS names are mirrored (ktlint's property-naming is off for the same reason)
 
 potential-bugs:
   UnsafeCallOnNullableType:
@@ -57,6 +65,8 @@ potential-bugs:
     active: true # force_cast (error)
   LateinitUsage:
     active: true # implicitly_unwrapped_optional
+    # Set once at launch, before anything reads them (Application.onCreate, configure(context)).
+    excludes: ['**/TurnApplication.kt', '**/service/Loc.kt', '**/service/UserDefaults.kt']
 
 exceptions:
   TooGenericExceptionCaught:

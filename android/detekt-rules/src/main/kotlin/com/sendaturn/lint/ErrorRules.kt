@@ -66,7 +66,7 @@ class SwallowedError(
                 handler.calleeName() == "getOrThrow" || handler.lambdaArguments.any { it.logsError() || it.throws() } ||
                     handler.valueArguments.any { it.getArgumentExpression()?.let { arg -> arg.logsError() || arg.throws() } == true }
             }
-        if (handled || NON_ACTIONABLE.containsMatchIn(chain.lines())) return
+        if (handled || NON_ACTIONABLE.containsMatchIn(chain.linesWithLineAbove())) return
         report(
             Finding(
                 Entity.from(expression),
@@ -123,7 +123,12 @@ class CancellationRethrow(
 
 private val CRASH_CALLS = setOf("error", "TODO", "check", "checkNotNull", "require", "requireNotNull", "assert")
 
-/** iOS no_fatal_error, no_precondition_failure, no_precondition, no_assertion_failure. */
+private val COMPOSITION_LOCALS = setOf("compositionLocalOf", "staticCompositionLocalOf")
+
+/**
+ * iOS no_fatal_error, no_precondition_failure, no_precondition, no_assertion_failure. A
+ * CompositionLocal's default may fail, as SwiftUI's @Environment does when nothing provides it.
+ */
 class NoCrashCall(
     config: Config,
 ) : Rule(config, "Crash calls crash in production: handle the state instead.") {
@@ -131,6 +136,7 @@ class NoCrashCall(
         super.visitCallExpression(expression)
         val name = expression.calleeName() ?: return
         if (name !in CRASH_CALLS || expression.isQualified() || expression.isPortStub()) return
+        if (expression.getStrictParentOfType<KtLambdaExpression>()?.callName() in COMPOSITION_LOCALS) return
         report(Finding(Entity.from(expression), "$name() crashes in production: handle the state instead."))
     }
 

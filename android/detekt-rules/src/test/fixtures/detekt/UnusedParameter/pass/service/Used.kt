@@ -6,6 +6,17 @@ fun laterBlock(name: String) {
     TODO("port: service/Greet.swift:8")
 }
 
+fun commented(modifier: String) {
+    // TODO("port: view/screen/Gallery.swift:6")
+}
+
+fun isLocked(turnID: String): Boolean = false // TODO("port: model/AppState+Keys.swift:162")
+
+fun save(key: String): Boolean {
+    // TODO("port: service/KeychainService.swift:63")
+    return false
+}
+
 fun defaulted(name: String, label: String = name): String = label
 
 abstract class Base {

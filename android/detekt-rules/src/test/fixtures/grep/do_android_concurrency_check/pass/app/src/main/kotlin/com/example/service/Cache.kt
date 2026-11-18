@@ -10,3 +10,5 @@ fun start() {
     player.addListener(listener)
 }
 suspend fun read(file: File): String = withContext(io) { file.readText() } // concurrent-safe: runs on the IO dispatcher
+// concurrent-safe: held only around synchronous libphonenumber calls, never across a suspension
+private val phoneLock = ReentrantLock()

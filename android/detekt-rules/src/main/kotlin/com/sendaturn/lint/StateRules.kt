@@ -98,7 +98,7 @@ class ComposableLocalState(
             }
         if (!holdsState) return
         val statement = expression.getStrictParentOfType<KtProperty>() ?: expression
-        if (NON_ACTIONABLE.containsMatchIn(statement.lines())) return
+        if (NON_ACTIONABLE.containsMatchIn(statement.linesWithLineAbove())) return
         report(
             Finding(
                 Entity.from(expression),

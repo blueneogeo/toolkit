@@ -93,9 +93,27 @@ _lint_code_grep() {
     _lint_grep "$pattern" "${dirs[@]}"
 }
 
-# Drops matches on comment lines (file:line: then //, * or /*).
+# Drops matches on comment, import and package lines.
 _lint_code_only() {
-    grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true
+    grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*|import[[:space:]]|package[[:space:]])' || true
+}
+
+# Drops matches whose line, or the line above, carries "// <form>: <reason>".
+# Kotlin lines run long, so the reason may sit on its own line above the code.
+_lint_annotated_filter() {
+    local form="$1" line file lineno above
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        [[ "$line" =~ //\ ${form}:[[:space:]]*[^[:space:]] ]] && continue
+        file="${line%%:*}"
+        lineno="${line#*:}"
+        lineno="${lineno%%:*}"
+        if [[ "$lineno" =~ ^[0-9]+$ && $lineno -gt 1 ]]; then
+            above=$(sed -n "$((lineno - 1))p" "$file" 2>/dev/null)
+            [[ "$above" =~ //\ ${form}:[[:space:]]*[^[:space:]] ]] && continue
+        fi
+        echo "$line"
+    done
 }
 
 _allow_filter_android() {
@@ -232,7 +250,7 @@ do_android_concurrency_check() {
 
     _conc_soft() {
         local pattern="$1" msg="$2" m
-        m=$(_lint_grep "$pattern" "$src" | _lint_code_only | grep -v '// concurrent-safe:' || true)
+        m=$(_lint_grep "$pattern" "$src" | _lint_code_only | _lint_annotated_filter concurrent-safe)
         if [[ -n "$m" ]]; then
             _lint_print "$msg" "$m"
             found=1
@@ -245,7 +263,8 @@ do_android_concurrency_check() {
         while IFS=: read -r file lineno _; do
             [[ -n "$file" ]] || continue
             window=$(sed -n "${lineno},$((lineno + 5))p" "$file")
-            if ! grep -qE "$required|// concurrent-safe:" <<< "$window"; then
+            window+=$'\n'"$(sed -n "$((lineno > 1 ? lineno - 1 : 1))p" "$file")"
+            if ! grep -qE "$required|// concurrent-safe:[[:space:]]*[^[:space:]]" <<< "$window"; then
                 m+="$file:$lineno:$(sed -n "${lineno}p" "$file")"$'\n'
             fi
         done < <(_lint_grep "$pattern" "$src" | _lint_code_only)
@@ -271,8 +290,8 @@ do_android_concurrency_check() {
         'Synchronous file I/O runs off the main thread: add // concurrent-safe: <reason> naming the dispatcher'
     _conc_soft 'Handler\(Looper\.myLooper|Handler\([A-Za-z_]*[lL]ooper\)|HandlerThread\(' \
         'A Handler off the main looper: add // concurrent-safe: <reason> naming what it guards'
-    camera_owner="${ANDROID_CAMERA_OWNER:-CameraSession.kt}"
-    matches=$(_lint_grep '\.bindToLifecycle\(' "$src" | grep -v "/$camera_owner:" | grep -v '// concurrent-safe:' || true)
+    camera_owner="${ANDROID_CAMERA_OWNER:-CameraController.kt}"
+    matches=$(_lint_grep '\.bindToLifecycle\(' "$src" | grep -v "/$camera_owner:" | _lint_annotated_filter concurrent-safe)
     if [[ -n "$matches" ]]; then
         _lint_print "bindToLifecycle outside $camera_owner: the camera owner binds and unbinds the camera" "$matches"
         found=1
@@ -285,7 +304,7 @@ do_android_concurrency_check() {
         'ListenableFuture.addListener: pass ContextCompat.getMainExecutor(context), or name the executor with // concurrent-safe:'
     _conc_callback '[cC]odec[A-Za-z0-9_]*\.setCallback\(' '[hH]andler' \
         'MediaCodec.setCallback: pass the codec Handler'
-    matches=$(_lint_grep 'registerReceiver\(' "$src" | grep -E 'Handler\(' | grep -v 'getMainLooper' | grep -v '// concurrent-safe:' || true)
+    matches=$(_lint_grep 'registerReceiver\(' "$src" | grep -E 'Handler\(' | grep -v 'getMainLooper' | _lint_annotated_filter concurrent-safe)
     if [[ -n "$matches" ]]; then
         _lint_print "registerReceiver with a Handler off the main looper: receive on the main thread" "$matches"
         found=1
@@ -647,6 +666,75 @@ do_android_project_lint_hook() {
     [[ -f "$hook" ]] || return 0
     source_dir=$(_lint_source_dir)
     PROJECT_ROOT="$PROJECT_ROOT" SOURCE_DIR="${source_dir#$PROJECT_ROOT/}" bash "$hook"
+}
+
+# ── Audit (iOS: overrides, unused, analyze) ──────────────────────────
+
+do_android_override_audit() {
+    local matches line
+    matches=$(_lint_code_grep '// lint:allow')
+    echo "── lint:allow overrides ──"
+    if [[ -z "$matches" ]]; then
+        echo "  (none)"
+    else
+        while IFS= read -r line; do
+            echo "  ${line#$PROJECT_ROOT/}"
+        done <<< "$matches"
+        echo ""
+        echo "  Each override is a deliberate departure from the architecture: rare, and it says why."
+    fi
+}
+
+# What R8 removes from the profile build (minified, the app's own classes only).
+do_android_unused() {
+    _gradle_require || return 1
+    local usage="$PROJECT_ROOT/${ANDROID_MODULE:-app}/build/outputs/mapping/profile/usage.txt" found
+    echo "→ Building the profile app with R8"
+    if ! _gradle_run unused ":${ANDROID_MODULE:-app}:assembleProfile"; then
+        echo "✗ Unused check failed:"
+        _gradle_failure "$(_gradle_log unused)"
+        return 1
+    fi
+    if [[ ! -f "$usage" ]]; then
+        echo "✗ R8 wrote no usage.txt at ${usage#$PROJECT_ROOT/}"
+        return 1
+    fi
+    found=$(grep -E "^${ANDROID_UNUSED_PACKAGE:-com\.sendaturn\.app}\." "$usage" | grep -vE '\.(BuildConfig|R|R\$[a-z]+)(:|$)' || true)
+    if [[ -n "$found" ]]; then
+        echo "✗ Unused code found ($(wc -l <<< "$found" | tr -d ' ') classes; members are listed under each):"
+        echo "$found" | head -200
+        echo "  Full list: ${usage#$PROJECT_ROOT/}"
+        return 1
+    fi
+    echo "✓ Unused code: none"
+}
+
+# Android Lint with compose-lints, every warning an error (the Gradle build reads turn.lint.strict).
+do_android_analyze() {
+    _gradle_require || return 1
+    local variant
+    variant=$(_build_variant)
+    if _gradle_run analyze ":${ANDROID_MODULE:-app}:lint$variant" -Pturn.lint.strict=true; then
+        echo "✓ Analyze passed"
+    else
+        echo "✗ Analyze failed:"
+        _gradle_failure "$(_gradle_log analyze)"
+        return 1
+    fi
+}
+
+# Everything that checks the code, as iOS's audit: lint, then unused and analyze.
+do_android_audit() {
+    local failed=""
+    do_android_override_audit
+    do_lint || failed+=" lint"
+    do_android_unused || failed+=" unused"
+    do_android_analyze || failed+=" analyze"
+    if [[ -n "$failed" ]]; then
+        echo "✗ Audit failed:$failed"
+        return 1
+    fi
+    echo "✓ Audit passed"
 }
 
 # Called by _lint_fast after ktlint and detekt.
