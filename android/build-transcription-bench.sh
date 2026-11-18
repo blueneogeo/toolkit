@@ -155,14 +155,15 @@ _bench_push() {
     }
     "$ADB" -s "$SERIAL" shell "rm -rf $staging && mkdir -p $staging" >/dev/null
     echo "→ Pushing clips to $(_target_label)"
-    while IFS= read -r file; do
+    # adb reads stdin, so the list comes on its own descriptor.
+    while IFS= read -r file <&3; do
         [[ -z "$file" ]] && continue
         local name="${file//\//_}"
         "$ADB" -s "$SERIAL" push "$corpus/$file" "$staging/$name" >/dev/null || { echo "✗ adb push $file failed"; return 1; }
         _run_as "$_BENCH_APP" "cp $staging/$name $folder/clips/$name" || { echo "✗ Could not copy $file into the app"; return 1; }
         "$ADB" -s "$SERIAL" shell "rm -f $staging/$name" >/dev/null
         count=$((count + 1))
-    done <<<"$listing"
+    done 3<<<"$listing"
     # The phone gets only the ids and files; the references stay on the Mac.
     local manifest
     manifest=$(mktemp)
@@ -171,7 +172,7 @@ _bench_push() {
     rm -f "$manifest"
     _run_as "$_BENCH_APP" "cp $staging/manifest.json $folder/manifest.json" || return 1
     "$ADB" -s "$SERIAL" shell "rm -rf $staging" >/dev/null
-    echo "✓ $count clips in $_BENCH_APP/$folder"
+    echo "✓ Clips in $_BENCH_APP/$folder: $count"
 }
 
 _bench_run() {
