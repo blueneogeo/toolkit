@@ -217,7 +217,7 @@ A dump fails while an endless animation keeps the screen from going idle. After 
 4. Uploads it to the `internal` track (`publishReleaseBundle`, the notes as `src/release/play/release-notes/en-US/default.txt`, removed after), then promotes it to each other track of `ANDROID_PLAY_TRACKS`.
 5. Annotates the tag with the versionCode, commit, time, tracks and notes, and logs the upload in `.watch/deploy.log`.
 
-`--dry-run` runs steps 1 and 3 and stops: no question, no tag, nothing sent to Play, and uncommitted changes only warn. Without an upload key it signs with a throwaway key it makes in `build/upload/THROWAWAY-dry-run-key-NOT-the-Play-upload-key.p12`, which Play would refuse. With the upload key it gives the signed bundle for the first upload, which Play takes only by hand in Play Console.
+`--dry-run` runs steps 1 and 3 and stops: no question, no tag, nothing sent to Play, and uncommitted changes only warn. Without an upload key it signs with a throwaway key it makes in `build/upload/THROWAWAY-dry-run-key-NOT-the-Play-upload-key.p12`, which Play would refuse. With the upload key it gives the signed bundle for the first upload, which Play takes only by hand in Play Console. After that upload, tag its commit `git tag -a android/v1 -m "build: 1 | first upload by hand"`, so the next upload's versionCode is 2.
 
 The secrets come from the environment, else from `keychain()` refs in the project's gitignored `.env.local`, read with `varlock printenv` as the server reads its own:
 
