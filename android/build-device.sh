@@ -186,7 +186,13 @@ do_screenshots_collect() {
     _select_android_target "${1:-}" || return 1
     local app_id
     app_id=$(_app_id) || return 1
-    local dest="${PROJECT_ROOT}/build/screenshots" tmp
+    _pull_app_screenshots "$app_id" "${PROJECT_ROOT}/build/screenshots"
+}
+
+# Copies the app's scripted screenshots from SERIAL into <dest>, printing
+# each file's path and the count.
+_pull_app_screenshots() {
+    local app_id="$1" dest="$2" tmp
     mkdir -p "$dest"
     tmp=$(mktemp -d)
     mkdir -p "$tmp/x"
@@ -209,4 +215,12 @@ do_screenshots_collect() {
         return 0
     fi
     echo "✓ Collected $count screenshot(s)"
+}
+
+# Removes the app's scripted screenshots, so the next run's are all that is
+# there. Debuggable builds with run-as, others in the external files folder.
+_clear_app_screenshots() {
+    local app_id="$1"
+    "$ADB" -s "$SERIAL" shell "run-as $app_id rm -rf files/DebugScreenshots" >/dev/null 2>&1 || true
+    "$ADB" -s "$SERIAL" shell "rm -rf /sdcard/Android/data/$app_id/files/DebugScreenshots" >/dev/null 2>&1 || true
 }
