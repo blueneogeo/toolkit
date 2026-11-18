@@ -38,6 +38,7 @@ source "$SCRIPT_DIR/build-setup.sh"
 source "$SCRIPT_DIR/build-icons.sh"
 source "$SCRIPT_DIR/build-transcription-bench.sh"
 source "$SCRIPT_DIR/build-profile.sh"
+source "$SCRIPT_DIR/build-upload.sh"
 
 PID_FILE="$PROJECT_ROOT/.watch/android.pid"
 TEST_TIMEOUT=120
@@ -191,6 +192,14 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
 
   Online (enable via build.properties):
     sentry <cmd>       Sentry queries (TOOLKIT_SENTRY_ENABLED, ANDROID_SENTRY_PROJECT)
+    preflight          Build the release bundle unsigned and check it, without uploading
+    upload [--dry-run] [--force] "release notes"
+                       Tag, build, sign and check the release bundle, upload it to Play's
+                       internal track, then promote it to ANDROID_PLAY_TRACKS
+                       (TOOLKIT_UPLOAD_ENABLED). --dry-run stops before the tag and Play
+                       ('./build.sh android upload --help')
+    promote <track> [--from <track>] ["release notes"]
+                       Hand the newest release on the internal track (or --from) to a track
 
   Parity with the leading platform:
     sync <status|diff|mark|map|init|coverage|guide>
@@ -247,9 +256,9 @@ EOF
 # ── Help ────────────────────────────────────────────────────────────
 
 # Every command, as _dispatch knows it. tests/help_test.sh checks both lists agree.
-ANDROID_COMMANDS="setup build clean install launch uninstall watch sentry test lint unused analyze audit
+ANDROID_COMMANDS="setup build bundle clean install launch uninstall watch sentry test lint unused analyze audit
     format doctor logs debug signin signout emulator push screenshot screenshots see record compare
-    ui lock blocker worktree night sync icons transcription-bench profile benchmark"
+    ui lock blocker worktree night sync icons transcription-bench profile benchmark preflight upload promote"
 
 # <command> --help: the command's own usage where it has one, else its rows and
 # section in config/README.md.
@@ -444,6 +453,9 @@ _dispatch() {
         transcription-bench) shift; do_transcription_bench "$@" ;;
         profile)     shift; do_profile "$@" ;;
         benchmark)   shift; do_benchmark "$@" ;;
+        preflight)   do_preflight ;;
+        upload)      shift; do_upload "$@" ;;
+        promote)     shift; do_promote "$@" ;;
         help|--help|-h|"") usage ;;
         *)
             echo "✗ Unknown android command: $1"
