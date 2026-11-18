@@ -1,0 +1,1 @@
+fun waits() = runBlocking { load() }

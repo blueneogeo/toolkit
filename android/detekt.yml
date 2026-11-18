@@ -1,0 +1,128 @@
+# detekt for Turn's Android app, on top of detekt's defaults (buildUponDefaultConfig).
+# It mirrors .swiftlint.yml, which iOS runs with --strict: every finding fails the build,
+# so each threshold below is SwiftLint's warning value (spec/tooling.md 3.6).
+# Rules switched off say why. detekt-test.yml and detekt-debug.yml go on top of this
+# file for the tests and the debug tools.
+
+complexity:
+  LongMethod:
+    allowedLines: 80 # function_body_length
+  CyclomaticComplexMethod:
+    allowedComplexity: 15 # cyclomatic_complexity
+  LargeClass:
+    allowedLines: 400 # type_body_length
+  LongParameterList:
+    allowedFunctionParameters: 8 # function_parameter_count
+    allowedConstructorParameters: 8
+  NestedBlockDepth:
+    allowedDepth: 4 # nesting
+  TooManyFunctions:
+    active: false # SwiftLint has no such rule; extensions of AppState mirror iOS files one to one
+  ComplexCondition:
+    active: false # SwiftLint has no such rule; conditions are ported as iOS writes them
+
+style:
+  MaxLineLength:
+    maxLineLength: 160 # line_length
+    excludeCommentStatements: true # ignores_comments
+  MagicNumber:
+    active: false # SwiftLint has no such rule; layout numbers are ported from iOS as written
+  ReturnCount:
+    active: false # SwiftLint has no such rule; iOS guards return early
+  ThrowsCount:
+    active: false # SwiftLint has no such rule
+  ForbiddenComment:
+    active: false # SwiftLint's todo rule is off on iOS
+  UnusedParameter:
+    active: false # turn > UnusedParameter, which lets the spine's TODO("port: ...") stubs through
+  MayBeConstant:
+    active: false # SwiftLint has no such rule; constants keep their iOS shape
+  FunctionOnlyReturningConstant:
+    active: false # SwiftLint has no such rule
+  LoopWithTooManyJumpStatements:
+    active: false # SwiftLint has no such rule; loops are ported as iOS writes them
+  UnusedPrivateProperty:
+    active: false # unused_declaration is an analyzer rule on iOS (the unused command), not part of lint
+  UnusedPrivateFunction:
+    active: false # unused_declaration, as above
+  UnusedPrivateClass:
+    active: false # unused_declaration, as above
+
+naming:
+  MatchingDeclarationName:
+    active: false # file names mirror iOS (AppStateSettings.kt holds SettingsState), as ktlint's filename rule
+  FunctionNaming:
+    ignoreAnnotated: ['Composable']
+    # Swift names kept: Log's private _log, and ByteArray(hexString) for Data(hexString:).
+    excludes: ['**/service/Log.kt', '**/service/PhoneOPRF.kt']
+  TopLevelPropertyNaming:
+    active: false # iOS names are mirrored (ktlint's property-naming is off for the same reason)
+
+potential-bugs:
+  UnsafeCallOnNullableType:
+    active: true # force_unwrapping (error)
+  UnsafeCast:
+    active: true # force_cast (error)
+  LateinitUsage:
+    active: true # implicitly_unwrapped_optional
+    # Set once at launch, before anything reads them (Application.onCreate, configure(context)).
+    excludes: ['**/TurnApplication.kt', '**/service/Loc.kt', '**/service/UserDefaults.kt']
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false # turn > SwallowedError and CancellationRethrow judge every catch
+  SwallowedException:
+    active: false # turn > SwallowedError
+  TooGenericExceptionThrown:
+    active: false # turn > NoCrashCall covers what crashes
+
+turn:
+  active: true
+  ErrorLineOnly:
+    active: true
+    # ErrorLine.kt is where error text is drawn. The alert, action sheet and menu draw
+    # destructive labels in Palette.error (decisions.md A1).
+    allowedFiles:
+      - view/component/ErrorLine.kt
+      - view/component/TurnAlert.kt
+      - view/component/TurnActionSheet.kt
+      - view/component/TurnMenu.kt
+  HairlineOnly:
+    active: true
+    allowedFiles:
+      - view/component/Hairline.kt
+  NoHapticTapInHandler:
+    active: true
+    allowedFiles:
+      - view/component/FeedbackButtonStyle.kt
+    # iOS's two handlers that tap: AppState+Feed.swift:207 (decisions.md B37) and the
+    # countdown's tick, AppState+RecordingTake.swift:35. Remove each when iOS drops it.
+    allowedFunctions:
+      - onPaperCardTapped
+      - startTakeAfterCountdown
+  IndicationNull:
+    active: true
+    # The top bar's icon buttons show Android's ripple (decisions.md, 18 November).
+    allowedFiles:
+      - view/component/TopBarIconButton.kt
+  ViewStateMutation:
+    active: true
+  ComposableLocalState:
+    active: true
+  StateClassShape:
+    active: true
+  ResetPresence:
+    active: true
+  SwallowedError:
+    active: true
+  CancellationRethrow:
+    active: true
+  NoCrashCall:
+    active: true
+  NoAnyErasure:
+    active: true
+    # Stands in for Foundation's UserDefaults, which stores Any.
+    allowedFiles:
+      - service/UserDefaults.kt
+  UnusedParameter:
+    active: true

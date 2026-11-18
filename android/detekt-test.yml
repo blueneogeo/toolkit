@@ -1,0 +1,26 @@
+# The tests (src/test, src/androidTest), on top of detekt.yml, as ios/TurnTests/.swiftlint.yml
+# is on top of .swiftlint.yml. The XCTest-only rules it switches off have no counterpart.
+
+coroutines:
+  RedundantSuspendModifier:
+    active: false # async_without_await
+
+complexity:
+  CyclomaticComplexMethod:
+    active: false # cyclomatic_complexity
+  NestedBlockDepth:
+    active: false # nesting
+
+potential-bugs:
+  UnsafeCallOnNullableType:
+    active: false # force_unwrapping
+  LateinitUsage:
+    active: false # implicitly_unwrapped_optional
+
+style:
+  MaxLineLength:
+    active: false # line_length
+
+empty-blocks:
+  EmptyFunctionBlock:
+    active: false # no_empty_block

@@ -1,0 +1,51 @@
+# The turn rule set's defaults, which detekt reads to validate a project's config.
+turn:
+  active: true
+  ErrorLineOnly:
+    active: true
+    # ErrorLine.kt is where error text is drawn. The alert, action sheet and menu draw
+    # destructive labels in Palette.error (decisions.md A1).
+    allowedFiles:
+      - view/component/ErrorLine.kt
+      - view/component/TurnAlert.kt
+      - view/component/TurnActionSheet.kt
+      - view/component/TurnMenu.kt
+  HairlineOnly:
+    active: true
+    allowedFiles:
+      - view/component/Hairline.kt
+  NoHapticTapInHandler:
+    active: true
+    allowedFiles:
+      - view/component/FeedbackButtonStyle.kt
+    # iOS's two handlers that tap: AppState+Feed.swift:207 (decisions.md B37) and the
+    # countdown's tick, AppState+RecordingTake.swift:35. Remove each when iOS drops it.
+    allowedFunctions:
+      - onPaperCardTapped
+      - startTakeAfterCountdown
+  IndicationNull:
+    active: true
+    # The top bar's icon buttons show Android's ripple (decisions.md, 18 November).
+    allowedFiles:
+      - view/component/TopBarIconButton.kt
+  ViewStateMutation:
+    active: true
+  ComposableLocalState:
+    active: true
+  StateClassShape:
+    active: true
+  ResetPresence:
+    active: true
+  SwallowedError:
+    active: true
+  CancellationRethrow:
+    active: true
+  NoCrashCall:
+    active: true
+  NoAnyErasure:
+    active: true
+    # Stands in for Foundation's UserDefaults, which stores Any.
+    allowedFiles:
+      - service/UserDefaults.kt
+  UnusedParameter:
+    active: true

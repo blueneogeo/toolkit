@@ -1,0 +1,1 @@
+val paper = Palette.feedPaper

@@ -1,0 +1,3 @@
+// MARK: Loading
+
+class FeedState

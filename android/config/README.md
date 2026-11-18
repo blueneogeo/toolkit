@@ -12,6 +12,9 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 |---|---|
 | `build.sh` | Settings, `--device` and `--config`, dispatch, usage |
 | `build-gradle.sh` | The JDK, the Gradle wrapper, `build`, `clean`, `test`, `lint`, `format` |
+| `build-lint.sh` | The grep gates (`do_android_arch_checks`) and the project's `lint.sh` hook |
+| `detekt-rules/` | Turn's detekt rules (rule set `turn`), and the fixture tests of every gate |
+| `detekt.yml`, `detekt-test.yml`, `detekt-debug.yml` | detekt's settings for the app, the tests and the debug tools |
 | `build-lifecycle.sh` | `install`, `launch`, `uninstall`, `watch`, `adb reverse`, the fixture session |
 | `build-debug.sh` | `logs`, `debug`, `signin`, `signout` |
 | `build-device.sh` | Target selection, `screenshot`, `screenshots collect`, `see` |
@@ -53,8 +56,13 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `ANDROID_SENTRY_PROJECT` | none | The Sentry project `sentry` reads |
 | `ANDROID_EMULATOR_PROFILE` | `pixel_8` | The avdmanager device profile `emulator create` and `setup` use while `ANDROID_EMULATOR_AVD` doesn't exist |
 | `ANDROID_EMULATOR_HARDWARE` | the iPhone 17 Pro's canvas | `config.ini` keys written into that first AVD: `hw.lcd.width=1206 hw.lcd.height=2622 hw.lcd.density=480 hw.ramSize=3072 hw.audioInput=no hw.camera.back=virtualscene hw.camera.front=emulated hw.keyboard=yes PlayStore.enabled=no` and a 1206x2622 skin without a frame |
-| `TOOLKIT_ARCH_CHECKS` | `true` | Runs `do_android_arch_checks` in lint when a lint file defines it, the token gate and the parity gate |
+| `TOOLKIT_ARCH_CHECKS` | `true` | Runs the grep gates of `build-lint.sh` and the project's `lint.sh` in `build` and `lint`, the token gate and the parity gate |
 | `TOOLKIT_TOKENS_DIRS` | `$TURN_ROOT/shared/tokens $PROJECT_ROOT/shared-pending/tokens` | The token folders the token gate reads, the later laid over the earlier; it checks them against iOS at their `ios_commit` in `TURN_ROOT` |
+| `ANDROID_SOURCE_DIR` | the parent of the first `model/` under `app/src/main/kotlin` | The app's Kotlin root for the architecture gates |
+| `ANDROID_TRANSPORT_FILE` | `service/APIClient.kt` | The transport the purity and construction gates check |
+| `ANDROID_RIPPLE_FILE` | `view/component/TopBarIconButton.kt` | The one file that may draw a ripple |
+| `ANDROID_CAMERA_OWNER` | `CameraController.kt` | The one file that may call `bindToLifecycle` |
+| `TOOLKIT_LINT_HOOK` | `lint.sh` | The project's own checks, run after the gates |
 | `TURN_ROOT` | none | The leading platform's repository; `sync` reads iOS from its commits, read-only |
 | `TOOLKIT_DEBUG_TIMEOUT` | `600` | Seconds a scripted `debug` waits for `DEBUG_SESSION_ENDED` |
 | `TOOLKIT_FIXTURE_SESSION_CMD` | `./build.sh fixture session` | Run with the slot before `--fixture` launches |
@@ -97,6 +105,9 @@ A lone argument to `screenshot` or `record` is the target only when it is one of
 | `test [filter] [timeout] [--no-build\|--build-only]` | `:app:test<Type>UnitTest --rerun`. The filter is a class name (`FeedLoadTests`) or `Class/method`. Stops Gradle after the timeout (120 s). Prints the verdict from the JUnit reports: `✓ 12 tests passed` or `✗ 2 of 12 tests failed:` and one line per failure. `--no-build` is accepted; Gradle compiles only what changed anyway. Asks the server first when `TOOLKIT_SERVER_ENABLED=true`. `--build-only` compiles the tests (`:app:compile<Type>UnitTestKotlin`) without running them and without asking the server, and prints `✓ Tests build`. |
 | `test instrumented [filter] [timeout] [--build-only]` | `:app:connected<Type>AndroidTest` on one device: the `--device` selector, else the running emulator (booted when nothing is connected), else the one phone. A filter `Class` or `Class/method` is looked up under `src/androidTest` for its package and passed as the runner's `class` argument; a dotted name is passed as it is. Same timeout and verdict as `test`, from the reports in `build/outputs/androidTest-results/connected/`. `--build-only` assembles the test APK (`:app:assemble<Type>AndroidTest`). Takes the emulator lock. |
 | `lint` | The `build` checks, then Android Lint (`:app:lint<Type>`). |
+| `unused` | Assembles the profile build (R8) and lists the app's classes and members in `build/outputs/mapping/profile/usage.txt`; fails when there are any. iOS: Periphery. |
+| `analyze` | Android Lint with compose-lints and `-Pturn.lint.strict=true`, which makes every warning an error. |
+| `audit` | Lists the `// lint:allow` overrides, then runs `lint`, `unused` and `analyze`. |
 | `format` | `ktlintFormat`. |
 
 Gradle's output goes to `build/logs/gradle-<command>.log`. On failure the toolkit prints the compiler errors, the failing tasks and Gradle's "What went wrong", then the log's path. Every Gradle call takes the gradle lock. While the night's `down/network` flag is set, Gradle runs `--offline`.
