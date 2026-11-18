@@ -4,7 +4,8 @@
 # "<LEVEL> [<cat>] <msg>"; logcat lines are shown as
 # "HH:MM:SS.mmm  LEVEL [cat] msg", the same as on iOS.
 #
-# Provides: _android_logs, _android_debug, _sign_in_or_out
+# Provides: _android_logs, _android_debug, _sign_in_or_out,
+#           _compare_prepare, _compare_run_script (for shared/compare.sh)
 # Depends on: _use_target, _app_id, _app_pid, _install_app, _am_start,
 #             _app_installed, _reverse_server_port, _find_apk (build-lifecycle.sh)
 # Depends on: do_build (build-gradle.sh), _lock_take (build-lock.sh)
@@ -498,4 +499,34 @@ _sign_in_or_out() {
         _SIGNIN_CODE="$2"
     fi
     _android_debug "$target" --no-build --script "$script"
+}
+
+# ── compare (shared/compare.sh) ─────────────────────────────────────
+
+# Builds once, then holds the emulator for every script of the run, so no
+# other agent's frames land between a script and its collect.
+_compare_prepare() {
+    local no_build="$1" target="$2"
+    _COMPARE_TARGET="$target"
+    if ! $no_build || [[ -z "$(_find_apk)" ]]; then
+        $no_build && echo "→ No built app found, building first"
+        do_build || return 1
+    fi
+    _lock_take emulator || return 1
+    _use_target "$target" || return 1
+}
+
+# One script: the app's old frames removed, a debug run with its output kept
+# in <log>, then the frames it saved copied into <frames dir>.
+_compare_run_script() {
+    local script="$1" log="$2" frames="$3" fixture="$4" timeout="$5" app_id code=0
+    app_id=$(_app_id) || return 1
+    _app_installed "$app_id" && _clear_app_screenshots "$app_id"
+    local args=(--no-build --script "$script")
+    [[ -n "$_COMPARE_TARGET" ]] && args=("$_COMPARE_TARGET" "${args[@]}")
+    [[ -n "$fixture" ]] && args+=(--fixture "$fixture")
+    [[ -n "$timeout" ]] && args+=(--timeout "$timeout")
+    { _android_debug "${args[@]}" 2>&1 | tee "$log"; } || code=$?
+    _pull_app_screenshots "$app_id" "$frames" | tail -1
+    return "$code"
 }
