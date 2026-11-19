@@ -466,10 +466,15 @@ def do_behind(make_context):
     """One line for the iOS build: how far the ledger is behind main. Never fails."""
     try:
         ctx = make_context()
+        ledger = ctx.ledger()
         main = ctx.main_commit()
+        marker = ledger.marker.ios_commit
+        # A branch synced past main (main inside the marker) is measured against its own HEAD.
+        if main and marker and ctx.repo.is_ancestor(main, marker):
+            main = None
         target = main or ctx.repo.resolve("HEAD")
         name = MAIN if main else "HEAD"
-        p = pending_against(ctx, ctx.ledger(), target, flags=False)
+        p = pending_against(ctx, ledger, target, flags=False)
         if p.units:
             print(f"Android is {p.units} unit{'s' if p.units != 1 else ''} behind {name}")
         elif p.shared_files:
