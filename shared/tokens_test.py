@@ -8,7 +8,6 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("tokens.py")
 
 COLORS = """schema = 2
-ios_commit = "abc1234"
 
 [palette]
 feed_paper = { hex = "#E6E2DA", source = "ios/Turn/design/DesignTokens.swift:4" }
@@ -23,7 +22,6 @@ card_tint = { ref = "palette.feed_ink", alpha = 0.42, source = "ios/Turn/design/
 """
 
 EFFECTS = """schema = 2
-ios_commit = "abc1234"
 
 [shadow.coral_lift]
 source = "ios/Turn/view/Lift.swift:3-4"
@@ -42,7 +40,6 @@ play_size = { value = 88, source = "ios/Turn/design/DesignTokens.swift:17" }
 """
 
 SPACE = """schema = 2
-ios_commit = "abc1234"
 
 [spacing]
 xs = { value = 4, source = "ios/Turn/design/Spacing.swift:4" }
@@ -62,7 +59,6 @@ seed = { value = 0x7A11, type = "int", source = "ios/Turn/view/Card.swift:3" }
 """
 
 MOTION = """schema = 2
-ios_commit = "abc1234"
 
 [curve]
 ease_in_out = { points = [0.42, 0.0, 0.58, 1.0] }
@@ -105,63 +101,6 @@ regular = "TurnUIReadable-Regular"
 android_files = ["turn_ui_readable_regular.ttf"]
 """
 
-DESIGN_TOKENS = """import SwiftUI
-
-enum Palette {
-    static let feedPaper = Color("#E6E2DA")
-    static let feedInk = Color("#36342F")
-    static let feedSecondaryInk = AdaptiveColor.contrast(Color("#625E57"), increased: highContrastSecondaryInk)
-    static let tabUnselectedInk = AdaptiveColor.contrast(feedInk.opacity(0.55), increased: feedInk.opacity(0.85))
-    static let coralGlow = Color(red: 80 / 255, green: 60 / 255, blue: 40 / 255)
-    /// 4.5:1 or more.
-    private static let highContrastSecondaryInk = Color("#4A4741")
-}
-
-enum Glass {
-    static let tint = Color("#D6D6D6").opacity(0.08)
-    static let cardTint = Palette.feedInk.opacity(0.42)
-    static let blur = 0.1388
-    static let playSize: CGFloat = 88
-}
-
-struct TabPlacement {
-    let drop: CGFloat
-    let left: CGFloat
-
-    static let feed = Self(drop: 0.37, left: 0.02)
-}
-"""
-
-SPACING = """import SwiftUI
-
-enum Spacing {
-    static let xs: CGFloat = 4
-    static let md: CGFloat = 12
-    static let pageStack: CGFloat = md
-}
-
-enum Motion {
-    static let zoomDuration: TimeInterval = 0.42
-    static let quickFade = Animation.easeInOut(duration: 0.2)
-    static let press = Animation.spring(response: 0.25, dampingFraction: 0.7)
-}
-"""
-
-LIFT = """extension View {
-    func coralLift() -> some View {
-        shadow(color: .black.opacity(0.18), radius: 4, y: 2)
-            .shadow(color: Palette.coralGlow.opacity(0.08), radius: 18, y: -8)
-    }
-}
-"""
-
-CARD = """enum FloatingCardMetrics {
-    static let lineGap = Spacing.xs
-    var random = SeededRandom(seed: 0x7A11)
-    static let largestTextSize = DynamicTypeSize.xxxLarge
-}
-"""
-
 TOML_FILES = {"colors.toml": COLORS, "effects.toml": EFFECTS, "space.toml": SPACE, "motion.toml": MOTION}
 
 
@@ -171,7 +110,6 @@ class TokensTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.tokens = self.root / "tokens"
         self.tokens.mkdir()
-        self.commit = "abc1234"
         for name, text in TOML_FILES.items():
             self.write(name, text)
 
@@ -179,7 +117,7 @@ class TokensTests(unittest.TestCase):
         self.temp.cleanup()
 
     def write(self, name, text, folder=None):
-        (folder or self.tokens).joinpath(name).write_text(text.replace("abc1234", self.commit))
+        (folder or self.tokens).joinpath(name).write_text(text)
 
     def edit(self, name, old, new):
         path = self.tokens / name
@@ -200,27 +138,6 @@ class TokensTests(unittest.TestCase):
         result = self.run_tokens("--kotlin", str(kotlin), "--swift", str(swift), seed=seed, folders=folders)
         self.assertEqual(0, result.returncode, result.stderr)
         return kotlin.read_text(), swift.read_text()
-
-    def ios_repo(self, design_tokens=DESIGN_TOKENS):
-        repo = self.root / "turn"
-        files = {
-            "ios/Turn/design/DesignTokens.swift": design_tokens,
-            "ios/Turn/design/Spacing.swift": SPACING,
-            "ios/Turn/view/Lift.swift": LIFT,
-            "ios/Turn/view/Card.swift": CARD,
-        }
-        for path, text in files.items():
-            (repo / path).parent.mkdir(parents=True, exist_ok=True)
-            (repo / path).write_text(text)
-        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com"]
-        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
-        subprocess.run(git + ["add", "."], check=True)
-        subprocess.run(git + ["commit", "-q", "-m", "tokens"], check=True)
-        head = subprocess.run(git + ["rev-parse", "--short=7", "HEAD"], capture_output=True, text=True, check=True)
-        self.commit = head.stdout.strip()
-        for name in TOML_FILES:
-            self.edit(name, 'ios_commit = "abc1234"', f'ios_commit = "{self.commit}"')
-        return repo
 
     def test_same_tokens_give_the_same_bytes(self):
         self.assertEqual(self.generate("first", seed="1"), self.generate("second", seed="4242"))
@@ -273,6 +190,10 @@ class TokensTests(unittest.TestCase):
             kotlin,
         )
         self.assertIn("val pressedInner: List<ShadowLayer> =", kotlin)
+        self.assertIn(
+            "ShadowLayer(color: TurnTokens.Palette.coralGlow, opacity: 0.08, radius: 18, x: 0, y: -8),",
+            swift,
+        )
         self.assertIn("static let zoomDuration: Double = 0.42", swift)
         self.assertIn("static let feed = DynamicTypeSize.xxxLarge", swift)
 
@@ -312,32 +233,40 @@ class TokensTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn("also in another file", result.stderr)
 
-    def test_ios_gate_passes_when_the_toml_matches_ios(self):
-        repo = self.ios_repo()
-        result = self.run_tokens("--ios-gate", str(repo))
+    def swift_code(self, text):
+        folder = self.root / "ios"
+        folder.mkdir(exist_ok=True)
+        (folder / "View.swift").write_text(text)
+        return folder
+
+    def test_ios_usage_lists_every_token_no_swift_code_names(self):
+        _, swift = self.generate()
+        folder = self.swift_code("let a = TurnTokens.Palette.feedPaper\nlet b = TurnTokens.Palette.feedSecondaryInkIncreased\n")
+        (folder / "TurnTokens.swift").write_text(swift)
+        result = self.run_tokens("--ios-usage", str(folder))
+        self.assertEqual(1, result.returncode)
+        self.assertNotIn("uses TurnTokens.Palette.feedPaper\n", result.stderr)
+        self.assertNotIn("uses TurnTokens.Palette.feedSecondaryInkIncreased\n", result.stderr)
+        self.assertIn("uses TurnTokens.Palette.feedSecondaryInk\n", result.stderr)
+        self.assertIn("uses TurnTokens.Shadow.pressedInner\n", result.stderr)
+        self.assertIn("uses TurnTokens.Motion.press\n", result.stderr)
+        self.assertIn("uses TurnTokens.FloatingCardMetrics.lineGap\n", result.stderr)
+
+    def test_ios_usage_passes_when_every_token_is_named(self):
+        _, swift = self.generate()
+        unused = self.run_tokens("--ios-usage", str(self.swift_code(""))).stderr.splitlines()
+        names = [line.split(" uses ")[1] for line in unused if " uses " in line]
+        self.assertIn("TurnTokens.Family.androidFiles", names)
+        folder = self.swift_code("\n".join(f"let x{index} = {name}" for index, name in enumerate(names)))
+        result = self.run_tokens("--ios-usage", str(folder))
         self.assertEqual(0, result.returncode, result.stderr)
 
-    def test_ios_gate_finds_changed_missing_and_moved_tokens(self):
-        changed = DESIGN_TOKENS.replace("#E6E2DA", "#E6E2DB").replace(
-            "    static let blur", "    static let rim = Color.white.opacity(0.3)\n    static let blur"
-        )
-        repo = self.ios_repo(changed)
-        self.edit("motion.toml", "damping = 0.7", "damping = 0.75")
-        self.edit("effects.toml", "alpha = 0.18", "alpha = 0.2")
-        result = self.run_tokens("--ios-gate", str(repo))
-        self.assertEqual(1, result.returncode)
-        self.assertIn("Palette.feedPaper: TOML #E6E2DA, Swift #E6E2DB", result.stderr)
-        self.assertIn("Glass.rim: no token in the TOML", result.stderr)
-        self.assertIn("source should be ios/Turn/design/DesignTokens.swift:17", result.stderr)
-        self.assertIn("Motion.press: TOML kind spring, response 0.25, damping 0.75", result.stderr)
-        self.assertIn("Lift.swift:3-4 lacks 0.2", result.stderr)
-
-    def test_ios_gate_checks_types(self):
-        repo = self.ios_repo()
-        self.edit("effects.toml", 'value = 0.1388, type = "double"', "value = 0.1388")
-        result = self.run_tokens("--ios-gate", str(repo))
-        self.assertEqual(1, result.returncode)
-        self.assertIn("Glass.blur: TOML is a float, Swift a double", result.stderr)
+    def test_an_android_list_is_not_in_swift(self):
+        android = 'android_files = { value = ["turn_ui_readable_regular.ttf"], platform = "android" }'
+        self.edit("motion.toml", 'android_files = ["turn_ui_readable_regular.ttf"]', android)
+        kotlin, swift = self.generate()
+        self.assertIn('val androidFiles: List<String> = listOf("turn_ui_readable_regular.ttf")', kotlin)
+        self.assertNotIn("androidFiles", swift)
 
 
 if __name__ == "__main__":

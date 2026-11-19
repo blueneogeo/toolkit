@@ -144,7 +144,7 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
     test instrumented [filter] [timeout] [--build-only] [--keep-installed]
                        Run the tests under src/androidTest on the emulator or a phone;
                        --keep-installed leaves the app and its data for a second run
-    lint               ktlint, detekt, the grep gates, the token gate, the parity gate and Android Lint on all sources
+    lint               ktlint, detekt, the grep gates, the parity gate and Android Lint on all sources
     unused             What R8 removes from the profile build, the app's own code only
     analyze            Android Lint with compose-lints, every warning an error
     audit              The lint overrides, then lint, unused and analyze
