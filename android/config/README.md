@@ -162,7 +162,7 @@ The target and the flags come in any order. A second target or an unknown flag s
 
 | Command | Does |
 |---|---|
-| `emulator start [avd] [--window]` | Boots the AVD (default `ANDROID_EMULATOR_AVD`) unless that AVD is running already, whatever other emulators run; headless unless `--window`, and waits until Android has finished booting. Its log is `build/emulator/emulator.log`. |
+| `emulator start [avd] [--window]` | Boots the AVD (default `ANDROID_EMULATOR_AVD`) unless that AVD is running already, whatever other emulators run; headless and silent unless `--window`, which has sound, and waits until Android has finished booting. Its log is `build/emulator/emulator.log`. |
 | `emulator stop [avd]` | Shuts that AVD's emulator down (default `ANDROID_EMULATOR_AVD`), never another one. |
 | `emulator status` | Lists the connected emulators (with their AVD) and phones (with their model). |
 | `emulator restart [avd\|serial]` | Shuts the running emulator down (`adb emu kill`) and boots the same AVD headless with `-no-snapshot-load`, a cold start with fresh system services, as `ios simulator restart`. |

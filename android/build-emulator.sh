@@ -77,11 +77,12 @@ _emulator_boot() {
         echo "✗ No AVD called $avd. Make it with: ./build.sh android emulator create $avd"
         return 1
     fi
-    local flags=(-avd "$avd" -no-snapshot-save -no-audio -no-boot-anim)
+    local flags=(-avd "$avd" -no-snapshot-save -no-boot-anim)
+    # A window is for a person, who hears the Turns; a headless emulator stays silent.
     if $window; then
         flags+=(-gpu host)
     else
-        flags+=(-no-window -gpu swiftshader_indirect)
+        flags+=(-no-window -no-audio -gpu swiftshader_indirect)
     fi
     flags+=("$@")
     local log_dir="${PROJECT_ROOT}/build/emulator"
