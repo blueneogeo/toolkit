@@ -531,6 +531,7 @@ _parity_extract() {
         --out "$PROJECT_ROOT/build/parity/ios.json" \
         --guide "$android/$guide" --project "$android" \
         || echo "⚠ Parity extraction failed; the build goes on"
+    PROJECT_ROOT="$android" python3 -B "$tool" behind 2>/dev/null || true
 }
 
 _do_build() {
