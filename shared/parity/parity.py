@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Parity map, ledger and sync commands. Stdlib only.
 
-Usage: parity.py <command> [args]   (run through ./build.sh sync, which sets PROJECT_ROOT and TURN_ROOT)
+Usage: parity.py <command> [args]   (run through ./build.sh android sync, which sets PROJECT_ROOT)
+
+iOS is read from commits of the repository the project sits in, never from its working tree.
+The target is a commit the current branch contains: main's head when the branch has no iOS
+commits main lacks, else HEAD. --to picks another.
 
   map [--gate] [--at <commit>]        Compare iOS and Android symbol by symbol; --gate fails on errors
   status [--to <commit>] [--verbose]  What changed on iOS since each unit was ported
@@ -9,6 +13,9 @@ Usage: parity.py <command> [args]   (run through ./build.sh sync, which sets PRO
   mark <unit>... [--to <commit>] [--status <s>] [--no-change "<reason>"]
                                       Record a unit as ported from the iOS commit
   mark --commit [--to <commit>]       Move the marker once nothing is pending
+  plan [--to <commit>] [--out <dir>] [--max-packages <n>]
+                                      Group the pending units into packages with a brief each
+  behind                              One line: how many units Android is behind main. Never fails
   init --at <commit> [--force]        Write the ledger: every unit at that commit
   coverage [<log file>|-]             Which scripts and frames show each view unit
   guide [--seed]                      Check (or print) the Coverage block of the porting guide
@@ -26,19 +33,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import parity_config  # noqa: E402
 import parity_guide  # noqa: E402
+import parity_plan  # noqa: E402
 import parity_sync  # noqa: E402
-from parity_extract import ParityError, Repo, Tools  # noqa: E402
+from parity_extract import ParityError, Repo, Tools, repository_root  # noqa: E402
 
 
 def context():
-    project_root = os.environ.get("PROJECT_ROOT") or os.getcwd()
-    turn_root = os.environ.get("TURN_ROOT", "")
-    if not turn_root:
-        raise ParityError("TURN_ROOT is not set; add it to build.properties.")
-    if not os.path.isdir(os.path.join(turn_root, ".git")) and not os.path.isfile(os.path.join(turn_root, ".git")):
-        raise ParityError(f"TURN_ROOT ({turn_root}) is not a git repository.")
-    config = parity_config.load(project_root, turn_root)
-    return parity_sync.Context(config, Repo(turn_root), Tools(project_root, quiet=os.environ.get("PARITY_QUIET") == "1"))
+    project_root = os.path.abspath(os.environ.get("PROJECT_ROOT") or os.getcwd())
+    repo_root = repository_root(project_root)
+    config = parity_config.load(project_root, repo_root)
+    return parity_sync.Context(config, Repo(repo_root), Tools(project_root, quiet=os.environ.get("PARITY_QUIET") == "1"))
 
 
 def main(argv):
@@ -65,6 +69,13 @@ def main(argv):
     p.add_argument("--no-change", dest="no_change")
     p.add_argument("--commit", action="store_true")
 
+    p = sub.add_parser("plan")
+    p.add_argument("--to")
+    p.add_argument("--out")
+    p.add_argument("--max-packages", dest="max_packages", type=int, default=parity_plan.MAX_PACKAGES)
+
+    sub.add_parser("behind")
+
     p = sub.add_parser("init")
     p.add_argument("--at", required=True)
     p.add_argument("--force", action="store_true")
@@ -89,6 +100,8 @@ def main(argv):
     if args.command is None:
         print(__doc__.strip())
         return 0
+    if args.command == "behind":
+        return parity_sync.do_behind(context)
     try:
         if args.command == "extract":
             return parity_sync.extract_ios_tree(args.ios_tree, args.out, args.guide, args.project)
@@ -113,6 +126,8 @@ def main(argv):
                 print("✗ Name at least one unit: sync mark <unit>... (or sync mark --commit)")
                 return 2
             return parity_sync.do_mark(ctx, args.units, to=args.to, status=args.status, no_change=args.no_change)
+        if args.command == "plan":
+            return parity_plan.do_plan(ctx, to=args.to, out=args.out, max_packages=args.max_packages)
         if args.command == "init":
             return parity_sync.do_init(ctx, args.at, force=args.force)
         if args.command == "coverage":

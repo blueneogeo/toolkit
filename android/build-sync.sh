@@ -1,7 +1,7 @@
 #!/bin/bash
 # android-toolkit/build-sync.sh: the parity map, its gate and the sync ledger
 # Sourced by build.sh. Wraps toolkit/shared/parity/parity.py, which reads iOS
-# from a commit of the leading repository (TURN_ROOT, read-only) and the
+# from commits of the repository the project sits in (read-only) and the
 # project's parity.toml and sync/ ledger.
 #
 # Provides: do_sync, _parity_gate
@@ -15,7 +15,6 @@ Usage: ./build.sh android sync <command> [args]
 
   status [--to <commit>] [-v]  Units whose iOS files changed since they were ported, with
                                the commits, symbol changes and interaction APIs in the diff.
-                               iOS is read from a commit of TURN_ROOT (default: its main).
                                Exits 1 while anything is pending
   diff <unit> [--to <commit>]  The iOS diff of one unit since it was ported
   mark <unit>... [--to <commit>] [--status <s>] [--no-change "<reason>"]
@@ -24,14 +23,23 @@ Usage: ./build.sh android sync <command> [args]
                                one that fails the parity check
   mark --commit [--to <commit>]
                                Move the marker once nothing is pending
+  plan [--to <commit>] [--out <dir>] [--max-packages <n>]
+                               Group the pending units into packages (at most 4 by default)
+                               and write a brief per package and plan.json to build/sync/<date>/
+  behind                       One line: "Android is N units behind main". Never fails
   map [--gate] [--at <commit>] [--unit <unit>]
                                Compare iOS and Android symbol by symbol; writes
                                build/parity/map.md. --gate fails on errors (lint runs it)
   init --at <commit> [--force] Write the ledger: one file per unit under sync/
   coverage [<log>|-]           Turn '[coverage] script=.. frame=.. views=..' log lines into
                                sync/coverage.json and flag view units no script shows
-  guide [--seed] [--at <c>]    Check the Coverage block of doc/platform-mapping.md, or print
-                               a seeded block with every iOS import and framework type
+  guide [--seed] [--at <c>]    Check the Coverage block of the porting guide (source.guide in
+                               parity.toml), or print a seeded block with every iOS import
+                               and framework type
+
+  iOS is read from commits of this repository, never from the working tree. The target is
+  a commit the current branch contains: main's head when the branch has no iOS commits
+  main lacks, else HEAD. mark takes only a commit the branch contains.
 
   A unit is an iOS file under ios/Turn, ios/debug or ios/TurnTests, named by its path
   without the extension and '+' (model/AppStateFeed), or by its iOS or Android path.
@@ -39,10 +47,6 @@ EOF
 }
 
 _sync_env() {
-    if [[ -z "${TURN_ROOT:-}" ]]; then
-        echo "✗ TURN_ROOT is not set. Add the leading repository's path to build.properties."
-        return 1
-    fi
     if ! command -v python3 >/dev/null 2>&1; then
         echo "✗ python3 is not installed; the parity tools need Python 3.11 or newer."
         return 1
@@ -51,7 +55,7 @@ _sync_env() {
 }
 
 _sync_python() {
-    JAVA_HOME="$_SYNC_JAVA_HOME" PROJECT_ROOT="$PROJECT_ROOT" TURN_ROOT="$TURN_ROOT" python3 -B "$PARITY_PY" "$@"
+    JAVA_HOME="$_SYNC_JAVA_HOME" PROJECT_ROOT="$PROJECT_ROOT" python3 -B "$PARITY_PY" "$@"
 }
 
 # Builds the extractors under the gradle lock when their sources changed.
@@ -76,6 +80,15 @@ do_sync() {
     case "${1:-}" in
         ""|help|--help|-h)
             _sync_usage
+            return 0
+            ;;
+        behind)
+            # Reads only git and the ledger: no JDK, no extractors, never a failure.
+            if ! command -v python3 >/dev/null 2>&1; then
+                echo "Android sync state unknown: python3 is not installed"
+                return 0
+            fi
+            PROJECT_ROOT="$PROJECT_ROOT" python3 -B "$PARITY_PY" behind || true
             return 0
             ;;
     esac

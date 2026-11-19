@@ -24,7 +24,15 @@ def run(args, cwd=None, input_text=None, check=True):
     return result
 
 
-# Git, read-only in Turn's repository
+# Git, read-only, at the top level of the repository the project sits in
+
+
+def repository_root(path):
+    """Top level of the git repository a folder sits in."""
+    out = run(["git", "-C", path, "rev-parse", "--show-toplevel"], check=False)
+    if out.returncode != 0:
+        raise ParityError(f"{path} is not inside a git repository.")
+    return out.stdout.strip()
 
 
 class Repo:
@@ -75,6 +83,15 @@ class Repo:
 
     def is_ancestor(self, a, b):
         return run(["git", "-C", self.root, "merge-base", "--is-ancestor", a, b], check=False).returncode == 0
+
+    def merge_base(self, a, b):
+        return self.git("merge-base", a, b).strip()
+
+    def touches(self, since, until, paths):
+        """Whether a commit in since..until changes one of the paths."""
+        if since == until:
+            return False
+        return bool(self.git("log", "-1", "--format=%H", f"{since}..{until}", "--", *paths).strip())
 
 
 def hash_files(project_root, paths):

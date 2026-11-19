@@ -67,8 +67,11 @@ def ledger_entries(ctx):
 
 def check(ctx, _results=None):
     path = guide_path(ctx)
+    if not os.path.exists(path):
+        print(f"  guide: {os.path.relpath(path, ctx.project_root)} doesn't exist yet; check skipped")
+        return []
     if read_block(path) is None:
-        print(f"  guide: no Coverage block in {GUIDE} yet (./build.sh sync guide --seed prints one)")
+        print(f"  guide: no Coverage block in {GUIDE} yet (./build.sh android sync guide --seed prints one)")
         return []
     return missing_in_guide(path, ledger_entries(ctx))
 
@@ -94,7 +97,7 @@ def do_guide(ctx, seed=False, at=None):
         return 0
     errors = missing_in_guide(guide_path(ctx), entries)
     if read_block(guide_path(ctx)) is None:
-        print(f"⚠ No Coverage block in {GUIDE}. Paste the output of ./build.sh sync guide --seed and fill the anchors.")
+        print(f"⚠ No Coverage block in {GUIDE}. Paste the output of ./build.sh android sync guide --seed and fill the anchors.")
         return 0
     for error in errors:
         print(f"✗ {error}")

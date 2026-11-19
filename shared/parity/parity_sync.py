@@ -19,6 +19,7 @@ INTERACTION_APIS = re.compile(
     r"highPriorityGesture|gesture|swipeActions|onSubmit|focused|sensoryFeedback)\b"
 )
 IOS_ONLY_WORDING = re.compile(r"Face ID|Touch ID|iCloud|Settings →|App Store|iPhone|iOS\b|Apple ID|AirDrop")
+MAIN = "main"
 
 
 @dataclass
@@ -34,13 +35,43 @@ class Context:
     def ledger(self):
         return Ledger(self.project_root, self.config.ledger_dir).load()
 
+    def sync_paths(self):
+        return self.config.ios_roots + list(self.config.shared)
+
+    def main_commit(self):
+        try:
+            return self.repo.resolve(MAIN)
+        except ParityError:
+            return None
+
     def default_target(self):
-        for name in ("main", "HEAD"):
-            try:
-                return self.repo.resolve(name)
-            except ParityError:
-                continue
-        raise ParityError("Turn's repository has no main branch")
+        """main's head when the branch has no iOS commits main lacks, else HEAD. Always a commit HEAD contains."""
+        head = self.repo.resolve("HEAD")
+        main = self.main_commit()
+        if main is None:
+            return head
+        base = self.repo.merge_base(main, head)
+        if self.repo.touches(base, head, self.sync_paths()):
+            return head
+        return base
+
+    def target(self, to=None):
+        return self.repo.resolve(to) if to else self.default_target()
+
+    def main_note(self):
+        """A line when main has iOS commits this branch doesn't have yet."""
+        main = self.main_commit()
+        if main is None:
+            return ""
+        head = self.repo.resolve("HEAD")
+        if self.repo.is_ancestor(main, head) or not self.repo.touches(self.repo.merge_base(main, head), main, self.sync_paths()):
+            return ""
+        return f"main ({short(main)}) has iOS commits this branch doesn't have; merge main to sync them"
+
+    def require_on_branch(self, target):
+        if not self.repo.is_ancestor(target, "HEAD"):
+            raise ParityError(f"iOS {short(target)} is not on this branch. The ledger only takes commits the branch "
+                              "contains; merge it first, or pass --to a commit of this branch.")
 
 
 def now():
@@ -144,7 +175,7 @@ def do_map(ctx, gate=False, at=None, only_unit=None):
         label = f"iOS {short(commit)}"
     else:
         if not ledger.units:
-            raise ParityError("No ledger under sync/. Run ./build.sh sync init --at <commit> first, or pass --at.")
+            raise ParityError("No ledger under sync/. Run ./build.sh android sync init --at <commit> first, or pass --at.")
         specs = ledger_specs(ctx, ledger)
         label = "the ledger's iOS blobs"
     if only_unit:
@@ -289,14 +320,35 @@ def symbol_table(entry):
             if s.kind not in ("script", "test") and (s.kind != "view" or s.detail == "ViewExtension")}
 
 
-def do_status(ctx, to=None, verbose=False):
-    ledger = ctx.ledger()
+@dataclass
+class Pending:
+    """What changed on iOS between the ledger and a target commit."""
+    target: str
+    marker: str
+    target_files: dict
+    changed: list       # (unit, changes); a change is (kind, old path, new path, old blob, new blob)
+    renamed: list
+    deleted: list
+    added_units: dict   # unit key -> [ios paths]
+    skipped: list
+    deferred: list
+    edited: list
+    shared: list        # lines
+
+    @property
+    def units(self):
+        return len(self.changed) + len(self.renamed) + len(self.deleted) + len(self.added_units)
+
+    @property
+    def shared_files(self):
+        return sum(1 for line in self.shared if not line.startswith(" "))
+
+
+def pending_against(ctx, ledger, target, flags=True):
     if not ledger.units:
-        raise ParityError("No ledger under sync/. Run ./build.sh sync init --at <commit> first.")
-    target = ctx.repo.resolve(to) if to else ctx.default_target()
+        raise ParityError("No ledger under sync/. Run ./build.sh android sync init --at <commit> first.")
     marker = ledger.marker.ios_commit or next(iter(ledger.units.values())).ios_commit
     target_files = ctx.repo.ls_tree(target, ctx.config.ios_roots)
-    print(f"iOS {short(target)} against the ledger (marker {short(marker)})")
 
     renames = {}
     if marker and marker != target:
@@ -345,61 +397,88 @@ def do_status(ctx, to=None, verbose=False):
         else:
             changed.append((unit, unit_changes))
 
-    added = sorted(p for p in target_files if p not in known and ctx.config.ios_unit(p))
     added_units = defaultdict(list)
-    for path in added:
+    for path in sorted(p for p in target_files if p not in known and ctx.config.ios_unit(p)):
         added_units[ctx.config.ios_unit(path)].append(path)
+    return Pending(target=target, marker=marker, target_files=target_files, changed=changed, renamed=renamed,
+                   deleted=deleted, added_units=dict(added_units), skipped=skipped, deferred=deferred, edited=edited,
+                   shared=shared_status(ctx, ledger, target, flags=flags))
 
-    shared_changes = shared_status(ctx, ledger, target)
-    moves = symbol_moves(ctx, changed + renamed, deleted, added_units, target_files)
 
-    pending = 0
-    if shared_changes:
+def do_status(ctx, to=None, verbose=False):
+    ledger = ctx.ledger()
+    target = ctx.target(to)
+    p = pending_against(ctx, ledger, target)
+    print(f"iOS {short(target)} against the ledger (marker {short(p.marker)})")
+    note = ctx.main_note()
+    if note and not to:
+        print(f"  {note}")
+    moves = symbol_moves(ctx, p.changed + p.renamed, p.deleted, p.added_units, p.target_files)
+
+    if p.shared:
         print("\nShared")
-        for line in shared_changes:
+        for line in p.shared:
             print("  " + line)
-        pending += len(shared_changes)
-    for title, items in (("Changed", changed), ("Renamed", renamed), ("Deleted on iOS", deleted)):
+    for title, items in (("Changed", p.changed), ("Renamed", p.renamed), ("Deleted on iOS", p.deleted)):
         if not items:
             continue
         print(f"\n{title}")
         for unit, unit_changes in sorted(items, key=lambda item: order_key(ctx, item[0].key)):
-            pending += 1
             print_unit(ctx, unit, unit_changes, target, moves, verbose)
-    if added_units:
+    if p.added_units:
         print("\nNew on iOS")
-        for key, paths in sorted(added_units.items(), key=lambda item: order_key(ctx, item[0])):
-            pending += 1
+        for key, paths in sorted(p.added_units.items(), key=lambda item: order_key(ctx, item[0])):
             android = android_paths_for(ctx.config, paths)
             arrow = f" -> {', '.join(android)}" if android else ""
             print(f"  new {', '.join(paths)}{arrow}")
             for path in paths:
-                for line in commit_messages(ctx, [path], marker, target)[:5]:
+                for line in commit_messages(ctx, [path], p.marker, target)[:5]:
                     print(f"      {line}")
             for text in moves.get(key, []):
                 print(f"      {text}")
-    if skipped or deferred:
+    if p.skipped or p.deferred:
         print("\nNot ported (moves forward with the marker)")
-    for unit, unit_changes in skipped:
+    for unit, unit_changes in p.skipped:
         print(f"  skipped (iOS-only: {unit.note or 'parity.toml'}) {unit.key}")
-    for unit, unit_changes in deferred:
+    for unit, unit_changes in p.deferred:
         print(f"  deferred, changed {unit.key}")
-    if edited:
+    if p.edited:
         print("\nEdited on Android after the last mark (fine; mark again when done)")
-        for unit in edited:
+        for unit in p.edited:
             print(f"  {unit.key}")
 
+    pending = p.units + p.shared_files
     unfinished = sum(1 for unit in ledger.units.values() if unit.status in ("todo", "stub", "partial"))
     if pending == 0:
         print(f"\n✓ Nothing pending: Android is in sync with iOS {short(target)}")
         if unfinished:
             print(f"  ({unfinished} unit(s) are still todo, stub or partial in the ledger; status lists iOS changes, "
                   "not unported units)")
-        if marker != target:
-            print(f"  Move the marker: ./build.sh sync mark --commit --to {short(target)}")
+        if p.marker != target:
+            print(f"  Move the marker: ./build.sh android sync mark --commit --to {short(target)}")
         return 0
-    print(f"\n{pending} unit(s) pending against iOS {short(target)}")
+    print(f"\n{p.units} unit(s) and {p.shared_files} shared file(s) pending against iOS {short(target)}")
+    print("  ./build.sh android sync plan groups them into packages with a brief each")
     return 1
+
+
+def do_behind(make_context):
+    """One line for the iOS build: how far the ledger is behind main. Never fails."""
+    try:
+        ctx = make_context()
+        main = ctx.main_commit()
+        target = main or ctx.repo.resolve("HEAD")
+        name = MAIN if main else "HEAD"
+        p = pending_against(ctx, ctx.ledger(), target, flags=False)
+        if p.units:
+            print(f"Android is {p.units} unit{'s' if p.units != 1 else ''} behind {name}")
+        elif p.shared_files:
+            print(f"Android is behind {name} in {p.shared_files} shared file{'s' if p.shared_files != 1 else ''}")
+        else:
+            print(f"Android is in sync with {name}")
+    except Exception as error:  # noqa: BLE001 (the iOS build must never fail on this line)
+        print(f"Android sync state unknown: {str(error).splitlines()[0] if str(error) else type(error).__name__}")
+    return 0
 
 
 def order_key(ctx, key):
@@ -462,75 +541,89 @@ def commit_messages(ctx, paths, since, target):
     return out.splitlines()
 
 
-def symbol_moves(ctx, changed, deleted, added_units, target_files):
-    """Per unit: symbols added, removed, changed, and moved to or from another unit."""
-    before, after = {}, {}
+def symbol_specs(changed, deleted, added_units, target_files):
+    """{unit key: ({ios path: old blob}, {ios path: new blob})} for the Swift files of pending units."""
+    specs = defaultdict(lambda: ({}, {}))
     for unit, unit_changes in changed + deleted:
         for kind, old, new, old_blob, new_blob in unit_changes:
             if old.endswith(".swift"):
-                before.setdefault(unit.key, {})[old] = old_blob
+                specs[unit.key][0][old] = old_blob
             if new and new.endswith(".swift") and new_blob:
-                after.setdefault(unit.key, {})[new] = new_blob
+                specs[unit.key][1][new] = new_blob
     for key, paths in added_units.items():
         for path in paths:
             if path.endswith(".swift"):
-                after.setdefault(key, {})[path] = target_files[path]
-    wanted = {}
-    for table in (before, after):
-        for files in table.values():
-            for path, blob in files.items():
-                wanted[f"{blob}:{path}"] = blob
+                specs[key][1][path] = target_files[path]
+    return dict(specs)
+
+
+def symbol_changes(ctx, specs):
+    """Per unit: symbols added, removed, changed, and moved to or from another unit."""
+    wanted = {f"{blob}:{path}": blob for before, after in specs.values() for table in (before, after)
+              for path, blob in table.items()}
     if not wanted:
         return {}
     extracted = ctx.tools.extract_ios(ctx.repo, wanted)
 
-    def symbols(table):
-        out = {}
-        for key, files in table.items():
-            merged = {}
-            for path, blob in files.items():
-                entry = extracted.get(f"{blob}:{path}")
-                if entry:
-                    entry = dict(entry, path=path)
-                merged.update(symbol_table(entry))
-            out[key] = merged
-        return out
+    def symbols(files):
+        merged = {}
+        for path, blob in files.items():
+            entry = extracted.get(f"{blob}:{path}")
+            if entry:
+                entry = dict(entry, path=path)
+            merged.update(symbol_table(entry))
+        return merged
 
-    old_symbols, new_symbols = symbols(before), symbols(after)
-    removed_where = {}
+    old_symbols = {key: symbols(before) for key, (before, _) in specs.items()}
+    new_symbols = {key: symbols(after) for key, (_, after) in specs.items()}
+    removed_where, added_where = {}, {}
     for key, table in old_symbols.items():
         for ident in table:
             if ident not in new_symbols.get(key, {}):
                 removed_where.setdefault(ident, key)
-    added_where = {}
     for key, table in new_symbols.items():
         for ident in table:
             if ident not in old_symbols.get(key, {}):
                 added_where.setdefault(ident, key)
-    notes = defaultdict(list)
-    for key in sorted(set(old_symbols) | set(new_symbols)):
+    out = {}
+    for key in sorted(specs):
         old, new = old_symbols.get(key, {}), new_symbols.get(key, {})
         added = [i for i in new if i not in old]
         removed = [i for i in old if i not in new]
-        modified = [i for i in new if i in old and new[i].kind != "type" and new[i].hash and new[i].hash != old[i].hash]
         moved_in = [i for i in added if removed_where.get(i) not in (None, key)]
         moved_out = [i for i in removed if added_where.get(i) not in (None, key)]
-        added = [i for i in added if i not in moved_in]
-        removed = [i for i in removed if i not in moved_out]
-        if added:
-            notes[key].append("added: " + ", ".join(new[i].display for i in added[:20]) + (" ..." if len(added) > 20 else ""))
-        if removed:
-            notes[key].append("removed: " + ", ".join(old[i].display for i in removed[:20]) + (" ..." if len(removed) > 20 else ""))
-        if modified:
-            notes[key].append("changed: " + ", ".join(new[i].display for i in modified[:20]) + (" ..." if len(modified) > 20 else ""))
-        for ident in moved_in:
-            notes[key].append(f"moved here from {removed_where[ident]}: {new[ident].display} (move the Kotlin body)")
-        for ident in moved_out:
-            notes[key].append(f"moved to {added_where[ident]}: {old[ident].display} (move the Kotlin body)")
+        out[key] = {
+            "added": [new[i] for i in added if i not in moved_in],
+            "removed": [old[i] for i in removed if i not in moved_out],
+            "modified": [new[i] for i in new if i in old and new[i].kind != "type" and new[i].hash and new[i].hash != old[i].hash],
+            "moved_in": [(new[i], removed_where[i]) for i in moved_in],
+            "moved_out": [(old[i], added_where[i]) for i in moved_out],
+        }
+    return out
+
+
+def symbol_notes(change):
+    def names(symbols):
+        return ", ".join(s.display for s in symbols[:20]) + (" ..." if len(symbols) > 20 else "")
+    notes = []
+    for label in ("added", "removed"):
+        if change[label]:
+            notes.append(f"{label}: {names(change[label])}")
+    if change["modified"]:
+        notes.append(f"changed: {names(change['modified'])}")
+    for symbol, where in change["moved_in"]:
+        notes.append(f"moved here from {where}: {symbol.display} (move the Kotlin body)")
+    for symbol, where in change["moved_out"]:
+        notes.append(f"moved to {where}: {symbol.display} (move the Kotlin body)")
     return notes
 
 
-def shared_status(ctx, ledger, target):
+def symbol_moves(ctx, changed, deleted, added_units, target_files):
+    changes = symbol_changes(ctx, symbol_specs(changed, deleted, added_units, target_files))
+    return {key: notes for key, change in changes.items() if (notes := symbol_notes(change))}
+
+
+def shared_status(ctx, ledger, target, flags=True):
     current = shared_files(ctx, target)
     lines = []
     for path, blob in sorted(current.items()):
@@ -538,7 +631,7 @@ def shared_status(ctx, ledger, target):
         if old == blob:
             continue
         lines.append(f"{'changed' if old else 'new'} {path}")
-        if path.endswith(".toml"):
+        if flags and path.endswith(".toml") and "locales/" in path:
             lines += [f"    {flag}" for flag in wording_flags(ctx, old, blob)]
     for path in sorted(set(ledger.marker.shared) - set(current)):
         lines.append(f"deleted {path}")
@@ -577,10 +670,16 @@ def flatten(data, prefix=""):
 def do_diff(ctx, name, to=None):
     ledger = ctx.ledger()
     unit = ledger.unit_for(name, ctx.config)
+    target = ctx.target(to)
     if unit is None:
-        raise ParityError(f"No unit '{name}' in the ledger")
-    target = ctx.repo.resolve(to) if to else ctx.default_target()
-    print(ctx.repo.git("diff", "-M", unit.ios_commit, target, "--", *sorted(unit.ios)), end="")
+        key = ctx.config.ios_unit(name) or name
+        paths = sorted(units_at(ctx, target).get(key, {}))
+        if not paths:
+            raise ParityError(f"No unit '{name}' in the ledger or at iOS {short(target)}")
+        since = ledger.marker.ios_commit
+    else:
+        paths, since = sorted(unit.ios), unit.ios_commit
+    print(ctx.repo.git("diff", "-M", since, target, "--", *paths), end="")
     return 0
 
 
@@ -589,7 +688,8 @@ def do_diff(ctx, name, to=None):
 
 def do_mark(ctx, names, to=None, status=None, no_change=None):
     ledger = ctx.ledger()
-    target = ctx.repo.resolve(to) if to else ctx.default_target()
+    target = ctx.target(to)
+    ctx.require_on_branch(target)
     current = units_at(ctx, target)
     refused = 0
     for name in names:
@@ -607,6 +707,10 @@ def do_mark(ctx, names, to=None, status=None, no_change=None):
                 ledger.remove_unit(key)
                 print(f"✓ {key} removed: deleted on iOS {short(target)}")
             continue
+        if unit and unit.ios_commit and not ctx.repo.is_ancestor(unit.ios_commit, target):
+            print(f"✗ {key}: it was marked from iOS {short(unit.ios_commit)}, which iOS {short(target)} doesn't contain")
+            refused += 1
+            continue
         ios_now = current[key]
         old_keys = [k for k in renamed_from(ctx, ledger, ios_now, current, target) if k != key]
         previous = unit or (ledger.units[old_keys[0]] if old_keys else None)
@@ -621,7 +725,7 @@ def do_mark(ctx, names, to=None, status=None, no_change=None):
             continue
         ios_changed = unit is None or unit.ios != ios_now
         android_changed = unit is None or {p: b for p, b in unit.android.items() if b} != android_now
-        new_status = status or default_mark_status(ctx, unit, android_now)
+        new_status = status or default_mark_status(ctx, unit, android_now, ios_now)
         if ios_changed and not android_changed and not no_change and unit is not None and unit.status not in ("ios-only", "deferred"):
             print(f"✗ {key}: iOS changed since {short(unit.ios_commit)} but its Android files did not. "
                   "Port the change, or pass --no-change \"<reason>\".")
@@ -639,6 +743,8 @@ def do_mark(ctx, names, to=None, status=None, no_change=None):
         note = unit.note if unit else ""
         if no_change:
             note = f"no Android change for iOS {short(target)}: {no_change}"
+        elif new_status in ("ios-only", "deferred") and not note:
+            note = exemption_reason(ctx.config, new_status, ios_now) or ""
         for old_key in old_keys:
             ledger.remove_unit(old_key)
             print(f"  {old_key} is now {key}")
@@ -675,8 +781,17 @@ def renamed_from(ctx, ledger, ios_now, current, target):
 STUB_MARKER = b'TODO("port:'
 
 
-def default_mark_status(ctx, unit, android_now):
-    """ported once no stub marker is left in the unit's Android files; stub or partial before that."""
+def exemption_reason(config, status, ios_paths):
+    find = config.ios_only_file if status == "ios-only" else config.deferred_file
+    return next((find(p) for p in sorted(ios_paths) if find(p)), None)
+
+
+def default_mark_status(ctx, unit, android_now, ios_paths=()):
+    """ported once no stub marker is left in the unit's Android files; stub or partial before that.
+    A unit parity.toml lists as iOS-only or deferred gets that status."""
+    for status in ("ios-only", "deferred"):
+        if exemption_reason(ctx.config, status, ios_paths):
+            return status
     if unit and unit.status in ("ios-only", "deferred"):
         return unit.status
     if not android_now:
@@ -690,7 +805,8 @@ def default_mark_status(ctx, unit, android_now):
 
 def do_mark_commit(ctx, to=None):
     ledger = ctx.ledger()
-    target = ctx.repo.resolve(to) if to else ctx.default_target()
+    target = ctx.target(to)
+    ctx.require_on_branch(target)
     current = units_at(ctx, target)
     pending = []
     for key, ios in current.items():

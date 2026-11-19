@@ -71,7 +71,7 @@ class Ledger:
 
     def write_unit(self, unit):
         lines = [
-            "# Written by ./build.sh sync mark. Edit only note.",
+            "# Written by ./build.sh android sync mark. Edit only note.",
             f"unit = {_quote(unit.key)}",
             f"status = {_quote(unit.status)}",
             f"ios_commit = {_quote(unit.ios_commit)}",
@@ -101,7 +101,7 @@ class Ledger:
 
     def write_marker(self):
         lines = [
-            "# The iOS commit Android is synced to. Written by ./build.sh sync init and sync mark --commit.",
+            "# The iOS commit Android is synced to. Written by ./build.sh android sync init and sync mark --commit.",
             f"ios_commit = {_quote(self.marker.ios_commit)}",
             f"synced_at = {_quote(self.marker.synced_at)}",
         ]

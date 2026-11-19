@@ -44,7 +44,7 @@ class Exemption:
 @dataclass
 class Config:
     project_root: str
-    turn_root: str
+    repo_root: str
     ios_root: str = "ios/Turn"
     ios_debug: str = "ios/debug"
     ios_tests: str = "ios/TurnTests"
@@ -79,7 +79,7 @@ class Config:
     # Units
 
     def ios_unit(self, path):
-        """Unit key of an iOS path relative to Turn's root, or None when the path is outside the iOS roots."""
+        """Unit key of an iOS path relative to the repository root, or None when the path is outside the iOS roots."""
         for prefix, root in (("", self.ios_root), ("debug/", self.ios_debug), ("tests/", self.ios_tests)):
             if path.startswith(root + "/"):
                 rel = path[len(root) + 1:]
@@ -203,14 +203,14 @@ def _patterns(value):
     return list(value)
 
 
-def load(project_root, turn_root, path=None):
+def load(project_root, repo_root, path=None):
     path = path or os.path.join(project_root, "parity.toml")
     with open(path, "rb") as handle:
         data = tomllib.load(handle)
     source = data.get("source", {})
     naming = data.get("naming", {})
     tiers = data.get("tiers", {})
-    config = Config(project_root=project_root, turn_root=turn_root)
+    config = Config(project_root=project_root, repo_root=repo_root)
     config.ios_root = source.get("ios_root", config.ios_root)
     config.ios_debug = source.get("ios_debug", config.ios_debug)
     config.ios_tests = source.get("ios_tests", config.ios_tests)
