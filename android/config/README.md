@@ -69,14 +69,13 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `ANDROID_DEBUG_TOOLS_PACKAGE` | `<package>.debug` | The package `preflight` and `upload` refuse to find in the release bundle |
 | `ANDROID_EMULATOR_PROFILE` | `pixel_8` | The avdmanager device profile `emulator create` and `setup` use while `ANDROID_EMULATOR_AVD` doesn't exist |
 | `ANDROID_EMULATOR_HARDWARE` | the iPhone 17 Pro's canvas | `config.ini` keys written into that first AVD: `hw.lcd.width=1206 hw.lcd.height=2622 hw.lcd.density=480 hw.ramSize=3072 hw.audioInput=no hw.camera.back=virtualscene hw.camera.front=emulated hw.keyboard=yes PlayStore.enabled=no` and a 1206x2622 skin without a frame |
-| `TOOLKIT_ARCH_CHECKS` | `true` | Runs the grep gates of `build-lint.sh` and the project's `lint.sh` in `build` and `lint`, the token gate and the parity gate |
-| `TOOLKIT_TOKENS_DIRS` | `$TURN_ROOT/shared/tokens $PROJECT_ROOT/shared-pending/tokens` | The token folders the token gate reads, the later laid over the earlier; it checks them against iOS at their `ios_commit` in `TURN_ROOT` |
+| `TOOLKIT_ARCH_CHECKS` | `true` | Runs the grep gates of `build-lint.sh` and the project's `lint.sh` in `build` and `lint`, and the parity gate |
 | `ANDROID_SOURCE_DIR` | the parent of the first `model/` under `app/src/main/kotlin` | The app's Kotlin root for the architecture gates |
 | `ANDROID_TRANSPORT_FILE` | `service/APIClient.kt` | The transport the purity and construction gates check |
 | `ANDROID_RIPPLE_FILE` | `view/component/TopBarIconButton.kt` | The one file that may draw a ripple |
 | `ANDROID_CAMERA_OWNER` | `CameraController.kt` | The one file that may call `bindToLifecycle` |
 | `TOOLKIT_LINT_HOOK` | `lint.sh` | The project's own checks, run after the gates |
-| `TURN_ROOT` | none | The leading platform's repository; `sync` reads iOS from its commits, read-only |
+| `TURN_ROOT` | the project's parent when it has `shared/` | The folder with `shared/` that the token and icon gates read. `sync` doesn't use it: it reads the repository the project sits in |
 | `TOOLKIT_DEBUG_TIMEOUT` | `600` | Seconds a scripted `debug` waits for `DEBUG_SESSION_ENDED` |
 | `TOOLKIT_FIXTURE_SESSION_CMD` | `./build.sh fixture session` | Run with the slot before `--fixture` launches |
 | `ANDROID_TRACE_PROCESSOR` | the one in androidx.benchmark's benchmark-common in the Gradle cache | The `trace_processor_shell` that `profile` runs on the device |
@@ -86,9 +85,9 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `TOOLKIT_NIGHT_DATE` | the newest night with a queue | Fixes which night folder `blocker add` and `doctor --watch` use |
 | `TOOLKIT_LOCK_TIMEOUT` | `1200` | Seconds a command waits for a lock |
 | `TOOLKIT_EMULATOR_LOCK` | none | A name for a separate emulator lock, `emulator-<name>`: commands take it in place of `emulator`. For an emulator nobody else uses, for example one kept open for a person to look at |
-| `TOOLKIT_WORKTREE_DIR` | `<parent>-<checkout>-work` | Where package worktrees go |
+| `TOOLKIT_WORKTREE_DIR` | `<checkout>-<project folder>-work` (`turn-android-work`), or `<parent>-<checkout>-work` for a project at the repository's top | Where package worktrees go |
 | `TOOLKIT_WORKTREE_BRANCH_PREFIX` | `pkg/` | Branch name before the package name |
-| `TOOLKIT_WORKTREE_COPY` | `local.properties build.properties.local` | Gitignored files copied into a new worktree |
+| `TOOLKIT_WORKTREE_COPY` | `local.properties build.properties.local` | The project's gitignored files copied into a new worktree |
 | `TOOLKIT_PACKAGES_FILE` | `<main checkout>/doc/packages.md` | The package list `night init` reads |
 | `TOOLKIT_IOS_COMMIT` | from `night/launch-prompt.md` | The iOS commit `night init` writes |
 
@@ -272,18 +271,20 @@ A lock is a directory per holder in `<overnight>/locks/` with the owner's PID an
 
 ### sync
 
-The parity map compares the leading platform's Swift with the project's Kotlin, symbol by symbol, and the ledger under `sync/` records which iOS blob each unit was ported from. iOS is always read from a commit of `TURN_ROOT` (`git -C "$TURN_ROOT"`, read-only), never from its working tree; `--to` defaults to its `main`.
+The parity map compares the leading platform's Swift with the project's Kotlin, symbol by symbol, and the ledger under `sync/` records which iOS blob each unit was ported from. iOS is read from commits of the repository the project sits in (read-only), never from the working tree. The target is a commit the current branch contains: main's head when the branch has no commit under the iOS roots or `shared/` that main lacks, else `HEAD`. `--to` picks another commit; `mark` takes only one the branch contains. When main has iOS commits the branch lacks, `status` and `plan` say so.
 
 | Command | Does |
 |---|---|
 | `sync status [--to <commit>] [-v]` | Lists shared inputs and units whose iOS files changed, were renamed (with git's similarity), added or deleted since the ledger's blobs. Per unit: the Android files, the diff stat, the commits that touched the files, symbols added, removed, changed and moved between units, and interaction APIs in the diff. `-v` prints the diffs. Exit 1 while anything is pending. |
-| `sync diff <unit> [--to <commit>]` | The iOS diff of one unit since its ledger commit. |
-| `sync mark <unit>... [--to] [--status <s>] [--no-change "<reason>"]` | Records the units at the iOS commit with their Android blobs. Refuses a unit whose iOS side changed while its Android files did not (unless `--no-change`), a unit whose mirrored Kotlin file is missing, and one that fails the parity check at that commit. A renamed unit replaces the old one; a unit deleted on iOS is removed once its Kotlin files are gone. The status defaults to `ported` once no `TODO("port:` is left, else `stub` or `partial`. |
+| `sync diff <unit> [--to <commit>]` | The iOS diff of one unit since its ledger commit; for a unit new on iOS, since the marker. |
+| `sync mark <unit>... [--to] [--status <s>] [--no-change "<reason>"]` | Records the units at the iOS commit with their Android blobs. Refuses a unit whose iOS side changed while its Android files did not (unless `--no-change`), a unit whose mirrored Kotlin file is missing, and one that fails the parity check at that commit. A renamed unit replaces the old one; a unit deleted on iOS is removed once its Kotlin files are gone. The status defaults to `ios-only` or `deferred` for a unit `parity.toml` lists so (its reason becomes the note), else `ported` once no `TODO("port:` is left, else `stub` or `partial`. Refuses a commit the branch doesn't contain. |
 | `sync mark --commit [--to]` | Moves the marker in `sync/_sync.toml` and records the shared inputs, refusing while any unit is pending. |
+| `sync plan [--to <commit>] [--out <dir>] [--max-packages <n>]` | Groups the pending units into packages and writes one brief per package and `plan.json` to `build/sync/<date>/` (or `--out`). Units start grouped by folder (`view/screen`, `view/component`, `model`, ...) in runs of at most 25; a test joins the unit it is named after, a view joins the `model/` unit that declares a type it uses. A package that uses a symbol another package adds waits for it: `wave` and `after` in `plan.json`, and packages waiting on each other become one. The smallest packages of a wave merge until at most `--max-packages` (4) are left. A brief has the units, the steps, the commit messages, the symbol changes, interaction APIs, flagged wording, the scripts and frames from `sync/coverage.json`, and each unit's iOS diff. With nothing pending it says so and exits 0. |
+| `sync behind` | One line against main's head: `Android is N units behind main`, `Android is behind main in N shared files` or `Android is in sync with main`. Reads only git and the ledger, in well under a second, and always exits 0. |
 | `sync map [--gate] [--at <commit>] [--unit <u>]` | Writes `build/parity/map.json` and `map.md`. `--gate` fails on a strict-tier symbol with no Kotlin twin, a misnamed or moved twin, an Android-only symbol or file with no reason in `parity.toml`, and names missing from the guide's Coverage block. `build` and `lint` run it. |
 | `sync init --at <commit> [--force]` | Writes one ledger file per unit: `stub` where Kotlin files exist, `todo` where none do, `ios-only` per `parity.toml`. |
 | `sync coverage [<log>\|-]` | Reads `[coverage] script=<name> frame=<frame> views=<A,B>` log lines into `sync/coverage.json` and names view units no script shows. |
-| `sync guide [--seed] [--at <commit>]` | Checks the fenced `toml` block under `## Coverage` in `doc/platform-mapping.md`, or prints a seeded block with every iOS import and framework type. |
+| `sync guide [--seed] [--at <commit>]` | Checks the fenced `toml` block under `## Coverage` in the porting guide (`source.guide` in `parity.toml`, default `doc/platform-mapping.md`), or prints a seeded block with every iOS import and framework type. A guide that doesn't exist yet is skipped. |
 
 The extractors build on first use into `build/parity-tools/`: the Swift one with swift-syntax (SwiftPM, about two minutes, offline once the package is in SwiftPM's cache), the Kotlin one with the Kotlin compiler's PSI from the Gradle cache, under the gradle lock. Results are cached per git blob in `build/parity/cache/`, so a warm map takes under a second.
 
@@ -301,7 +302,7 @@ The transcription quality test's host side (Turn's `spec/recording.md` 6.6). `pu
 
 ### worktree
 
-`worktree new <package>` adds `<TOOLKIT_WORKTREE_DIR>/<package>` on a new branch `pkg/<package>` from the main checkout's current branch, fills each submodule from the main checkout's own clone (`git -c protocol.file.allow=always submodule update --init`, no network), copies `local.properties` and `build.properties.local`, and prints the path last. The submodule is checked out at the commit the branch pins; when the main checkout's clone is ahead, it says so, because worktrees only get toolkit changes once the pointer is committed.
+`worktree new <package>` adds `<TOOLKIT_WORKTREE_DIR>/<package>`, a worktree of the whole repository the project sits in, on a new branch `pkg/<package>` from the main checkout's current branch. Each submodule is cloned from the main checkout's own folder (`git -c protocol.file.allow=always -c submodule.<name>.url=<main>/<path> submodule update --init`, no network), the project's `local.properties` and `build.properties.local` are copied, and the worktree's root is printed last. Run `./build.sh android ...` there. The submodule is checked out at the commit the branch pins; when the main checkout's submodule is ahead, it says so, because worktrees only get toolkit changes once the pointer is committed.
 
 `worktree remove <package>` refuses while the worktree has uncommitted changes or its branch isn't merged into the main checkout's branch. Then it removes the worktree (git needs `--force` for a worktree with submodules) and deletes the branch with `git branch -d`. `--force` removes it anyway and keeps the branch.
 

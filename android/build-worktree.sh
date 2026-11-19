@@ -1,8 +1,10 @@
 #!/bin/bash
-# android-toolkit/build-worktree.sh: package worktrees of the project's repository
+# android-toolkit/build-worktree.sh: package worktrees of the repository the project sits in
 # Sourced by build.sh. A worktree gets branch <prefix><package> from the main
-# checkout's current branch, its submodules filled from the main checkout's
-# own clones without network, and the gitignored local files copied over.
+# checkout's current branch, its submodules cloned from the main checkout's
+# own submodule folders without network, and the project's gitignored local
+# files copied over. The project may be a folder of a larger repository
+# (android/ in Turn); the worktree is of the whole repository.
 #
 # Provides: _worktree_root, do_worktree
 # Depends on: _main_checkout (build-overnight.sh)
@@ -13,21 +15,27 @@ Usage: ./build.sh android worktree new <package> [--from <ref>]
        ./build.sh android worktree remove <package> [--force]
        ./build.sh android worktree list
 
-  new       Make <worktrees>/<package> on a new branch pkg/<package>, from the
-            main checkout's current branch (or --from <ref>). toolkit/ is filled
-            from the main checkout's toolkit clone, at the commit the branch
-            pins, without network. local.properties and build.properties.local
-            are copied from the main checkout. Prints the worktree's path last.
+  new       Make <worktrees>/<package>, a worktree of the whole repository, on a
+            new branch pkg/<package> from the main checkout's current branch (or
+            --from <ref>). Each submodule (toolkit/) is cloned from the main
+            checkout's own folder, at the commit the branch pins, without
+            network. The project's local.properties and build.properties.local
+            are copied over. Prints the worktree's root last; run ./build.sh there.
   remove    Remove the worktree and delete its branch. Refuses when the worktree
             has uncommitted changes or its branch isn't merged into the main
             checkout's branch; --force removes it anyway and keeps the branch.
   list      The package worktrees and their branches.
 
-  Worktrees live in TOOLKIT_WORKTREE_DIR (default: <checkout's parent>-<checkout>-work,
+  Worktrees live in TOOLKIT_WORKTREE_DIR (default: <checkout>-<project folder>-work,
   for example /Users/christian/projects/turn-android-work). Branches are
   TOOLKIT_WORKTREE_BRANCH_PREFIX (default pkg/) plus the package name.
   TOOLKIT_WORKTREE_COPY lists the local files to copy.
 EOF
+}
+
+# The project's folder inside its repository ("android/"), empty at the top.
+_worktree_project_dir() {
+    git -C "$PROJECT_ROOT" rev-parse --show-prefix 2>/dev/null || true
 }
 
 _worktree_root() {
@@ -35,8 +43,14 @@ _worktree_root() {
         echo "$TOOLKIT_WORKTREE_DIR"
         return 0
     fi
-    local main parent
+    local main parent folder
     main=$(_main_checkout)
+    folder=$(_worktree_project_dir)
+    folder=${folder%/}
+    if [[ -n "$folder" ]]; then
+        echo "$main-${folder//\//-}-work"
+        return 0
+    fi
     parent=$(dirname "$main")
     echo "$(dirname "$parent")/$(basename "$parent")-$(basename "$main")-work"
 }
@@ -97,13 +111,22 @@ _worktree_new() {
     [[ -d "$path" ]] || { echo "✗ git worktree add failed."; return 1; }
 
     if [[ -f "$path/.gitmodules" ]]; then
-        local out
-        if ! out=$(git -C "$path" -c protocol.file.allow=always submodule update --init --quiet 2>&1); then
-            echo "✗ Submodules could not be filled from the local clones:"
+        local out key sub name
+        local -a urls=()
+        # Clone each submodule from the main checkout's folder, never from its remote.
+        while read -r key sub; do
+            [[ -n "$sub" ]] || continue
+            name=${key#submodule.}
+            name=${name%.path}
+            if [[ -e "$main/$sub/.git" ]]; then
+                urls+=(-c "submodule.$name.url=$main/$sub")
+            fi
+        done < <(git -C "$path" config -f .gitmodules --get-regexp '\.path$' || true)
+        if ! out=$(git -C "$path" -c protocol.file.allow=always ${urls[@]+"${urls[@]}"} submodule update --init --quiet 2>&1); then
+            echo "✗ Submodules could not be filled from the main checkout:"
             sed 's/^/  /' <<<"$out"
             return 1
         fi
-        local sub
         while read -r _ sub; do
             [[ -n "$sub" ]] || continue
             local pinned mine
@@ -116,11 +139,12 @@ _worktree_new() {
         done < <(git -C "$path" config -f .gitmodules --get-regexp '\.path$' || true)
     fi
 
-    local file
+    local file folder
+    folder=$(_worktree_project_dir)
     for file in ${TOOLKIT_WORKTREE_COPY:-local.properties build.properties.local}; do
-        if [[ -f "$main/$file" ]]; then
-            cp "$main/$file" "$path/$file"
-            echo "  copied $file"
+        if [[ -f "$main/$folder$file" ]]; then
+            cp "$main/$folder$file" "$path/$folder$file"
+            echo "  copied $folder$file"
         fi
     done
 
