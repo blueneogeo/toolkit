@@ -162,8 +162,8 @@ The target and the flags come in any order. A second target or an unknown flag s
 
 | Command | Does |
 |---|---|
-| `emulator start [avd] [--window]` | Boots the AVD (default `ANDROID_EMULATOR_AVD`), headless unless `--window`, and waits until Android has finished booting. Its log is `build/emulator/emulator.log`. |
-| `emulator stop` | Shuts the running emulator down. |
+| `emulator start [avd] [--window]` | Boots the AVD (default `ANDROID_EMULATOR_AVD`) unless that AVD is running already, whatever other emulators run; headless unless `--window`, and waits until Android has finished booting. Its log is `build/emulator/emulator.log`. |
+| `emulator stop [avd]` | Shuts that AVD's emulator down (default `ANDROID_EMULATOR_AVD`), never another one. |
 | `emulator status` | Lists the connected emulators (with their AVD) and phones (with their model). |
 | `emulator restart [avd\|serial]` | Shuts the running emulator down (`adb emu kill`) and boots the same AVD headless with `-no-snapshot-load`, a cold start with fresh system services, as `ios simulator restart`. |
 | `emulator create <name> [--image <package>] [--profile <device>]` | Makes an AVD with `avdmanager`, unless one of that name exists, and prints its name last. Without `--profile` it copies the hardware of `ANDROID_EMULATOR_AVD` (screen, density, memory, cameras, no microphone, no Play Store); the image is `ANDROID_EMULATOR_IMAGE` unless `--image`. For `Turn_Min` (`--image "system-images;android-31;google_apis;arm64-v8a"`) and `Turn_Journey`. |

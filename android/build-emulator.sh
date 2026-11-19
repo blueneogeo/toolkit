@@ -459,21 +459,18 @@ do_emulator() {
                 echo "✗ No AVD configured. Set ANDROID_EMULATOR_AVD in build.properties."
                 return 1
             fi
-            if [[ "$avd" == "$ANDROID_EMULATOR_AVD" ]]; then
-                local running
-                running=$(_connected_serials | grep '^emulator-' | head -1 || true)
-                if [[ -n "$running" ]]; then
-                    echo "✓ Emulator already running ($running)"
-                    return 0
-                fi
-            fi
             _emulator_boot "$avd" "$window"
             ;;
         stop)
-            local serial
-            serial=$(_connected_serials | grep '^emulator-' | head -1 || true)
+            # By AVD name (default ANDROID_EMULATOR_AVD), never whichever emulator comes first.
+            local serial avd="${2:-$ANDROID_EMULATOR_AVD}"
+            if [[ -z "$avd" ]]; then
+                echo "✗ Name the AVD to stop: ./build.sh android emulator stop <avd>"
+                return 1
+            fi
+            serial=$(_serials_of_avd "$avd" | head -1)
             if [[ -z "$serial" ]]; then
-                echo "✓ No emulator running"
+                echo "✓ $avd is not running"
                 return 0
             fi
             "$ADB" -s "$serial" emu kill >/dev/null 2>&1 || true
