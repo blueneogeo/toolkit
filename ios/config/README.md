@@ -78,6 +78,9 @@ the debug-script folder (`TOOLKIT_LINT_EXTRA_DIRS`, default `<Test target> debug
 | `TOOLKIT_LOGS_ENABLED` | `true` | `logs` / `debug` |
 | `TOOLKIT_DEBUG_SCRIPTS` | `false` | `debug --script` injection |
 | `TOOLKIT_ARCH_CHECKS` | `true` | AppState architecture lint gates |
+| `TOOLKIT_OVERRIDE_RULES` | none | Rule ids of the project's own gates that `// lint:allow <rule-id> <reason>` may name |
+| `TOOLKIT_TOKENS_DIR` | `../shared/tokens` | The look tokens; when the folder exists, every build writes them into `TOOLKIT_TOKENS_SWIFT` and `lint` fails on a token no Swift code under the source folder names |
+| `TOOLKIT_TOKENS_SWIFT` | `<source>/design/generated/TurnTokens.swift` | The generated Swift tokens, build output |
 
 ### Architecture lint gates
 

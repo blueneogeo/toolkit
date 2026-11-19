@@ -457,7 +457,35 @@ _guard_not_running() {
 
 # ── Project ─────────────────────────────────────────────────────────
 
+# The look tokens: TOOLKIT_TOKENS_DIR (default ../shared/tokens beside the
+# project) written into TOOLKIT_TOKENS_SWIFT before XcodeGen and xcodebuild
+# read the sources. The Swift file is build output. Skipped when the project
+# has no token folder.
+_tokens_dir() {
+    local dir="${TOOLKIT_TOKENS_DIR:-$PROJECT_ROOT/../shared/tokens}"
+    [[ -d "$dir" ]] && echo "$dir"
+}
+
+_tokens_swift() {
+    echo "${TOOLKIT_TOKENS_SWIFT:-$PROJECT_ROOT/$SOURCE_DIR/design/generated/TurnTokens.swift}"
+}
+
+_generate_tokens() {
+    local dir
+    dir=$(_tokens_dir) || return 0
+    python3 -B "$SCRIPT_DIR/../shared/tokens.py" --tokens "$dir" --swift "$(_tokens_swift)" >/dev/null
+}
+
+# Every token the Swift file holds is named by code under SOURCE_DIR.
+_tokens_usage_check() {
+    local dir
+    dir=$(_tokens_dir) || return 0
+    _generate_tokens || return 1
+    python3 -B "$SCRIPT_DIR/../shared/tokens.py" --tokens "$dir" --ios-usage "$PROJECT_ROOT/$SOURCE_DIR"
+}
+
 _ensure_project() {
+    _generate_tokens || return 1
     local project_file="$PROJECT_ROOT/$PROJECT_NAME.xcodeproj/project.pbxproj"
     if [[ ! -f "$project_file" ]]; then
         _require_cmd xcodegen "Install with: brew install xcodegen"
@@ -1727,8 +1755,8 @@ do_tsan_test() {
 
 # Override convention shared by every heuristic gate in this file:
 #   // lint:allow <rule-id> <reason>
-# The rule-id must be one of KNOWN_OVERRIDE_RULES and the reason must be
-# non-empty. Hard-forbidden gates (do_any_check, the hard concurrency tier)
+# The rule-id must be one of KNOWN_OVERRIDE_RULES, or of the project's own
+# gates in TOOLKIT_OVERRIDE_RULES, and the reason must be non-empty. Hard-forbidden gates (do_any_check, the hard concurrency tier)
 # do not honor overrides at all — those must be restructured, not annotated.
 KNOWN_OVERRIDE_RULES='message-bus view-state-mutation uikit-from-state'
 
@@ -1739,11 +1767,11 @@ _allow_filter() {
 
 do_override_syntax_check() {
     local found=0
-    local line rest rule reason
+    local line rest rule reason known="$KNOWN_OVERRIDE_RULES ${TOOLKIT_OVERRIDE_RULES:-}"
     while IFS= read -r line; do
         rest="${line#*// lint:allow }"
         rule="${rest%% *}"
-        if [[ " $KNOWN_OVERRIDE_RULES " != *" $rule "* ]]; then
+        if [[ " $known " != *" $rule "* ]]; then
             echo "  ✗ unknown override rule '${rule}': ${line#$PROJECT_ROOT/}"
             found=1
             continue
@@ -1759,7 +1787,7 @@ do_override_syntax_check() {
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "  // lint:allow <rule-id> <reason> — rule-id must be one of:"
-        echo "  $KNOWN_OVERRIDE_RULES"
+        echo "  $known"
         echo "  A reason is mandatory; unknown rule-ids do not suppress."
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         return 1
@@ -2386,6 +2414,7 @@ do_lint() {
         do_concurrency_check || return 1
         do_structure_check || return 1
         do_arch_checks || return 1
+        _tokens_usage_check || return 1
     else
         do_try_check || return 1
         do_annotation_reason_check || return 1
