@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The transcription quality test's numbers (Turn's spec/recording.md 6.6).
+"""The transcription quality test's numbers.
 
 Reads a corpus manifest with human reference transcripts and one or more
 results.json files written by the app's benchmark script, and prints per

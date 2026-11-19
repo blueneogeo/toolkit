@@ -106,14 +106,14 @@ class HairlineOnly(
 
 /**
  * A button's tap comes from its press style (FeedbackButtonStyle.kt); handlers tick, press,
- * heavy or sent. The two exceptions are iOS's own (spec/elements-shared.md).
+ * heavy or sent. The two exceptions are iOS's own.
  */
 class NoHapticTapInHandler(
     config: Config,
 ) : Rule(config, "Haptics.tap() is the button's: call it only in FeedbackButtonStyle.kt.") {
     private val allowedFiles: List<String> by config(listOf("view/component/FeedbackButtonStyle.kt"))
 
-    // AppState+Feed.swift:207 (decisions.md B37) and AppState+RecordingTake.swift:35, the countdown's tick.
+    // AppState+Feed.swift:207 (doc/android/open.md B37) and AppState+RecordingTake.swift:35, the countdown's tick.
     private val allowedFunctions: List<String> by config(listOf("onPaperCardTapped", "startTakeAfterCountdown"))
 
     override fun visitCallExpression(expression: KtCallExpression) {

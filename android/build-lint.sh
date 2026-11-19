@@ -2,7 +2,7 @@
 # android-toolkit/build-lint.sh: the grep gates, ported from toolkit/ios/build.sh
 # Sourced by build.sh. _lint_fast (build-gradle.sh) runs do_android_arch_checks
 # after ktlint and detekt; the gates that need the syntax tree are detekt rules
-# in detekt-rules/ (spec: android/doc/spec/tooling.md 3.6).
+# in detekt-rules/.
 #
 # Provides: do_android_arch_checks, ANDROID_GATES and every do_android_*_check
 # Depends on: PROJECT_ROOT; ANDROID_MODULE (default app); optional
@@ -536,7 +536,7 @@ do_android_transport_construction_check() {
 
 # ── The look (platform-mapping.md, Lint gates for the look) ─────────
 
-# The one file that may draw a ripple: the top bar's icon buttons (decisions.md, 18 November).
+# The one file that may draw a ripple: the top bar's icon buttons (doc/android/decisions.md A75).
 _lint_ripple_file_pattern() {
     local file="${ANDROID_RIPPLE_FILE:-view/component/TopBarIconButton.kt}"
     echo "/${file//./\\.}:"
@@ -588,7 +588,7 @@ do_android_shadow_check() {
     matches=$(_lint_code_grep '\.(shadow|dropShadow)\(|(^|[^A-Za-z0-9_.])dropShadow\(' | _lint_code_only)
     if [[ -n "$matches" ]]; then
         _lint_print "Modifier.shadow or dropShadow: use turnShadow or compositedShadow" "$matches"
-        _lint_footer "Shadows are turnShadow (layered, visual.md 4.5) or compositedShadow."
+        _lint_footer "Shadows are turnShadow (layered) or compositedShadow."
         return 1
     fi
     echo "✓ Shadow check passed"

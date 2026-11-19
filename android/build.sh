@@ -208,7 +208,7 @@ Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [<args
                        Hand the newest release on the internal track (or --from) to a track
 
   Parity with the leading platform:
-    sync <status|diff|mark|map|init|coverage|guide>
+    sync <status|diff|plan|behind|mark|map|init|coverage|guide>
                        Compare with iOS and keep the per-unit ledger under sync/
                        ('./build.sh android sync --help')
     icons [generate|check|scan|sheet]

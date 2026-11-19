@@ -4,7 +4,7 @@ import dev.detekt.api.RuleSet
 import dev.detekt.api.RuleSetId
 import dev.detekt.api.RuleSetProvider
 
-/** Turn's rules: the iOS gates that need the syntax tree (spec/tooling.md 3.6). */
+/** Turn's rules: the iOS gates that need the syntax tree. */
 class TurnRuleSetProvider : RuleSetProvider {
     override val ruleSetId = RuleSetId("turn")
 

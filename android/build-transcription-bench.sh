@@ -39,7 +39,7 @@ Usage: ./build.sh android transcription-bench [target] [step] [options]
     --timeout <s>        How long run waits for the script (default 14400)
     --json               report prints its numbers as JSON instead of tables
 
-  The corpus manifest (spec/recording.md 6.6):
+  The corpus manifest:
     { "clips": [ { "id": "nl-switch-01", "file": "clips/nl-switch-01.m4a",
                    "language": "nl", "kind": "switching",
                    "reference": [ { "start": 0.4, "end": 3.1, "language": "nl",

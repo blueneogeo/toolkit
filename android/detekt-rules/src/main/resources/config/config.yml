@@ -4,7 +4,7 @@ turn:
   ErrorLineOnly:
     active: true
     # ErrorLine.kt is where error text is drawn. The alert, action sheet and menu draw
-    # destructive labels in Palette.error (decisions.md A1).
+    # destructive labels in Palette.error (doc/android/decisions.md A1).
     allowedFiles:
       - view/component/ErrorLine.kt
       - view/component/TurnAlert.kt
@@ -18,14 +18,14 @@ turn:
     active: true
     allowedFiles:
       - view/component/FeedbackButtonStyle.kt
-    # iOS's two handlers that tap: AppState+Feed.swift:207 (decisions.md B37) and the
+    # iOS's two handlers that tap: AppState+Feed.swift:207 (doc/android/open.md B37) and the
     # countdown's tick, AppState+RecordingTake.swift:35. Remove each when iOS drops it.
     allowedFunctions:
       - onPaperCardTapped
       - startTakeAfterCountdown
   IndicationNull:
     active: true
-    # The top bar's icon buttons show Android's ripple (decisions.md, 18 November).
+    # The top bar's icon buttons show Android's ripple (doc/android/decisions.md A75).
     allowedFiles:
       - view/component/TopBarIconButton.kt
   ViewStateMutation:
