@@ -200,8 +200,15 @@ class Comparer:
         return []
 
     def _owners(self, owner):
+        """The owner, its framework stand-in, and the Kotlin name of a renamed type."""
+        owners = [owner]
         mapped = self.config.type_map.get(owner)
-        return [owner, mapped] if mapped else [owner]
+        if mapped:
+            owners.append(mapped)
+        renamed = self.renames.get(owner)
+        if renamed and not renamed[0] and renamed[1][:1].isupper() and renamed[1] not in owners:
+            owners.append(renamed[1])
+        return owners
 
     def _finish(self, row, status):
         hard = row.status in ("misnamed", "moved")
