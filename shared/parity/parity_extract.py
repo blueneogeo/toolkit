@@ -82,7 +82,9 @@ def hash_files(project_root, paths):
     existing = [p for p in paths if os.path.isfile(os.path.join(project_root, p))]
     if not existing:
         return {}
-    out = run(["git", "-C", project_root, "hash-object", "--stdin-paths"], input_text="\n".join(existing) + "\n").stdout
+    # Absolute paths: inside a larger repository, --stdin-paths reads them from its top level.
+    absolute = [os.path.abspath(os.path.join(project_root, p)) for p in existing]
+    out = run(["git", "-C", project_root, "hash-object", "--stdin-paths"], input_text="\n".join(absolute) + "\n").stdout
     return dict(zip(existing, out.split()))
 
 
