@@ -11,6 +11,17 @@ TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The host project root. The project entry exports TOOLKIT_PROJECT_ROOT; when
 # run directly, fall back to walking up from the toolkit to the nearest go.mod.
+
+# Go stamps the build with the commit, which fails in a linked worktree; the
+# server then shows "dev" as its revision.
+_go_vcs_flag() {
+    local dir common
+    dir=$(git -C "$PROJECT_ROOT" rev-parse --absolute-git-dir 2>/dev/null) || return 0
+    common=$(cd "$PROJECT_ROOT" && cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd) || return 0
+    [[ "$dir" != "$common" ]] && echo "-buildvcs=false"
+    return 0
+}
+
 _detect_project() {
     if [[ -n "${TOOLKIT_PROJECT_ROOT:-}" ]]; then
         PROJECT_ROOT="$TOOLKIT_PROJECT_ROOT"
@@ -150,7 +161,7 @@ do_build() {
     local build_log
     build_log=$(mktemp)
     echo "→ Building server..."
-    if (cd "$PROJECT_ROOT" && go build -o "$PROJECT_ROOT/$SERVER_BIN_PATH" "$SERVER_CMD_PATH") > "$build_log" 2>&1; then
+    if (cd "$PROJECT_ROOT" && go build $(_go_vcs_flag) -o "$PROJECT_ROOT/$SERVER_BIN_PATH" "$SERVER_CMD_PATH") > "$build_log" 2>&1; then
         rm -f "$build_log"
         _register_firewall
         echo "✓ Server built"
@@ -216,7 +227,7 @@ do_watch() {
         echo "[$(date '+%H:%M:%S')] → $(basename "$changed")"
         local watch_log
         watch_log=$(mktemp)
-        if _sync_locale > "$watch_log" 2>&1 && (cd "$PROJECT_ROOT" && sqlc generate) > "$watch_log" 2>&1 && _check_quality > "$watch_log" 2>&1 && (cd "$PROJECT_ROOT" && go build -o "$PROJECT_ROOT/$SERVER_BIN_PATH" "$SERVER_CMD_PATH") >> "$watch_log" 2>&1; then
+        if _sync_locale > "$watch_log" 2>&1 && (cd "$PROJECT_ROOT" && sqlc generate) > "$watch_log" 2>&1 && _check_quality > "$watch_log" 2>&1 && (cd "$PROJECT_ROOT" && go build $(_go_vcs_flag) -o "$PROJECT_ROOT/$SERVER_BIN_PATH" "$SERVER_CMD_PATH") >> "$watch_log" 2>&1; then
             rm -f "$watch_log"
             _register_firewall
             kill "$server_pid" 2>/dev/null || true
