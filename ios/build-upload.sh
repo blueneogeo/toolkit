@@ -77,8 +77,17 @@ _check_encryption_answer() {
         fi
     done < <(find "$app" -type f -perm +111)
     if [[ -n "$found" ]]; then
+        # IOS_ENCRYPTION_DOCUMENTED: the date App Store Connect's App Encryption
+        # Documentation was answered and Apple said no documents and NO are right
+        # (standard algorithms, not in France).
+        if [[ -n "${IOS_ENCRYPTION_DOCUMENTED:-}" ]]; then
+            echo "  ✓ The app carries its own crypto library and says NO, as Apple accepted on $IOS_ENCRYPTION_DOCUMENTED (IOS_ENCRYPTION_DOCUMENTED):"
+            printf "%s" "$found"
+            return 0
+        fi
         echo "  ✗ The app tells Apple it uses only Apple's encryption, but these carry BoringSSL or OpenSSL:"
         printf "%s" "$found"
+        echo "    File App Encryption Documentation in App Store Connect, then set IOS_ENCRYPTION_DOCUMENTED=<date> in build.properties"
         return 1
     fi
     echo "  ✓ Only Apple's encryption in the app, as its Info.plist tells Apple"
