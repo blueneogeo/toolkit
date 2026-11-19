@@ -66,7 +66,8 @@ LABELS = (
 LABEL_RE = re.compile(r"\b(" + "|".join(LABELS) + r")\s*:")
 STRING_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 SF_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(\.[a-z0-9]+)*$")
-FUNCTIONS = ("getConnectionSymbol",)
+# Functions whose returned literals are SF Symbol names: any get...Symbol on AppState.
+FUNCTION_RE = r"get[A-Z]\w*Symbol"
 STATIC_SYMBOLS = re.compile(r"static let (deleted|locked)\s*=\s*\"([^\"]+)\"")
 
 # Android: literal TurnIcon calls.
@@ -215,11 +216,10 @@ def scan_source(path, source):
         end = expression_end(source, match.end())
         for value, offset in literals(source, match.end(), end):
             hits.append((value, f"{path}:{line_of(offset)}"))
-    for name in FUNCTIONS:
-        for match in re.finditer(r"func " + name + r"\b[^{]*\{", source):
-            end = expression_end(source, match.end() - 1)
-            for value, offset in literals(source, match.end(), end):
-                hits.append((value, f"{path}:{line_of(offset)}"))
+    for match in re.finditer(r"func " + FUNCTION_RE + r"\b[^{]*\{", source):
+        end = expression_end(source, match.end() - 1)
+        for value, offset in literals(source, match.end(), end):
+            hits.append((value, f"{path}:{line_of(offset)}"))
     for match in STATIC_SYMBOLS.finditer(source):
         if SF_NAME_RE.match(match.group(2)):
             hits.append((match.group(2), f"{path}:{line_of(match.start(2))}"))
