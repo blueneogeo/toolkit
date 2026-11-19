@@ -489,6 +489,22 @@ _provisioning_auth_args() {
     echo "-authenticationKeyPath $key_path -authenticationKeyID $IOS_KEY_ID -authenticationKeyIssuerID $IOS_ISSUER_ID"
 }
 
+# Writes build/parity/ios.json for the Android parity tools and prints one line.
+# Never fails the build. TOOLKIT_PARITY_PROJECT names the Android project
+# (default: android/ next to this project), whose parity.toml names the guide.
+_parity_extract() {
+    local tool="$SCRIPT_DIR/../shared/parity/parity.py"
+    [[ -f "$tool" ]] && command -v python3 &>/dev/null && command -v swift &>/dev/null || return 0
+    local android="${TOOLKIT_PARITY_PROJECT:-$PROJECT_ROOT/../android}"
+    [[ -f "$android/parity.toml" ]] || return 0
+    local guide
+    guide=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("source", {}).get("guide", "doc/platform-mapping.md"))' "$android/parity.toml")
+    PROJECT_ROOT="$PROJECT_ROOT" python3 -B "$tool" extract --ios-tree "$PROJECT_ROOT/.." \
+        --out "$PROJECT_ROOT/build/parity/ios.json" \
+        --guide "$android/$guide" --project "$android" \
+        || echo "⚠ Parity extraction failed; the build goes on"
+}
+
 _do_build() {
     local action="${1:-build}"
     local cfg
@@ -497,6 +513,7 @@ _do_build() {
     _validate_target
     _ensure_project
     do_lint || return 1
+    _parity_extract
     echo "→ Building $PROJECT_NAME for $_TARGET_NAME ($_TARGET_SDK, $cfg)"
     local logfile
     logfile=$(mktemp)

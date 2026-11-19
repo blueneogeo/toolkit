@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Map the iOS app's SF Symbols to Material Symbols Rounded vectors.
 
-The mapping is icons.toml in the shared tokens folders (the project's
-shared-pending/tokens laid over TURN_ROOT/shared/tokens). Each entry is keyed
+The mapping is icons.toml in TURN_ROOT/shared/tokens. Each entry is keyed
 by an SF Symbol name:
 
   [icons."xmark.circle.fill"]
@@ -411,7 +410,7 @@ class Project:
     def __init__(self, args):
         self.root = Path(args.project)
         self.turn_root = Path(args.turn_root)
-        self.folders = [self.turn_root / "shared" / "tokens", self.root / "shared-pending" / "tokens"]
+        self.folders = [self.turn_root / "shared" / "tokens"]
         self.package = args.package
         source = self.root / "app" / "src" / "main"
         self.drawables = source / "res" / "drawable"

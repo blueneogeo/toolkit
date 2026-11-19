@@ -63,6 +63,12 @@ _load_android_config() {
         fi
     done
 
+    # The leading repository: by default the one this project sits in, when it has shared/.
+    if [[ -z "${TURN_ROOT:-}" && -d "$PROJECT_ROOT/../shared" ]]; then
+        TURN_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)"
+    fi
+    export TURN_ROOT
+
     TOOLKIT_SERVER_ENABLED="${TOOLKIT_SERVER_ENABLED:-false}"
     TOOLKIT_UPLOAD_ENABLED="${TOOLKIT_UPLOAD_ENABLED:-false}"
     TOOLKIT_SENTRY_ENABLED="${TOOLKIT_SENTRY_ENABLED:-false}"

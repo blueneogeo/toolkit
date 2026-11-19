@@ -15,7 +15,7 @@ TOKENS_PY="$SCRIPT_DIR/../shared/tokens.py"
 # ios_commit in TURN_ROOT. Skipped when no token folder exists.
 _tokens_gate() {
     local dirs=() dir
-    for dir in ${TOOLKIT_TOKENS_DIRS:-${TURN_ROOT:+$TURN_ROOT/shared/tokens} $PROJECT_ROOT/shared-pending/tokens}; do
+    for dir in ${TOOLKIT_TOKENS_DIRS:-${TURN_ROOT:+$TURN_ROOT/shared/tokens}}; do
         [[ -d "$dir" ]] && dirs+=(--tokens "$dir")
     done
     if [[ ${#dirs[@]} -eq 0 ]]; then

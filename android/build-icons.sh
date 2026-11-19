@@ -27,7 +27,7 @@ _icons_python() {
 
 # Skipped when the project has no icons.toml.
 _icons_gate() {
-    [[ -f "$PROJECT_ROOT/shared-pending/tokens/icons.toml" || -f "${TURN_ROOT:-/nonexistent}/shared/tokens/icons.toml" ]] || return 0
+    [[ -f "${TURN_ROOT:-/nonexistent}/shared/tokens/icons.toml" ]] || return 0
     echo "→ Icons gate"
     _icons_python check
 }

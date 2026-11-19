@@ -70,6 +70,7 @@ class Config:
     android_only_symbols: list = field(default_factory=list)
     deferred: list = field(default_factory=list)
     ledger_dir: str = "sync"
+    guide: str = "doc/platform-mapping.md"
 
     @property
     def ios_roots(self):
@@ -220,6 +221,7 @@ def load(project_root, turn_root, path=None):
     config.android_instrumented_tests = source.get("android_instrumented_tests", "")
     config.shared = source.get("shared", [])
     config.ledger_dir = source.get("ledger", config.ledger_dir)
+    config.guide = source.get("guide", config.guide)
     config.strict = tiers.get("strict", ["model/**", "service/**"])
     config.component = tiers.get("component", ["view/**"])
     config.drop_in_file_names = naming.get("drop_in_file_names", config.drop_in_file_names)

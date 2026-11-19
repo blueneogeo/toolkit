@@ -4,12 +4,13 @@ import os
 import re
 import tomllib
 
-GUIDE = os.path.join("doc", "platform-mapping.md")
+GUIDE = "the porting guide"
 BLOCK = re.compile(r"^## Coverage\s*$.*?^```toml\s*$(.*?)^```", re.MULTILINE | re.DOTALL)
 
 
 def guide_path(ctx):
-    return os.path.join(ctx.project_root, GUIDE)
+    """The porting guide: parity.toml's source.guide, relative to the project."""
+    return os.path.normpath(os.path.join(ctx.project_root, ctx.config.guide))
 
 
 def read_block(path):
