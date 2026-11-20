@@ -62,6 +62,7 @@ Turn runs it as `./build.sh <command>` inside the Android repository, or `androi
 | `ANDROID_SENTRY_PROJECT` | none | The Sentry project `sentry` reads |
 | `TOOLKIT_UPLOAD_ENABLED` | `false` | `upload` and `promote` |
 | `DEPLOY_TAG_PREFIX` | `android/v` | The upload tags; the number after it is the versionCode |
+| `ANDROID_FIRST_VERSION_CODE` | `1` | The versionCode of the first upload; later ones count up from it |
 | `ANDROID_PLAY_TRACKS` | `internal` | The tracks an upload ends on, comma-separated. It always goes to `internal` first and is promoted to the others, as `TESTFLIGHT_GROUPS` hands an iOS build on |
 | `ANDROID_PLAY_RELEASE_STATUS` | `completed` | The status of every release `upload` and `promote` make. `draft` while Play still calls the app a draft app |
 | `ANDROID_KEY_ALIAS` | `upload` | The key's alias in the upload keystore |
@@ -210,13 +211,13 @@ A dump fails while an endless animation keeps the screen from going idle. After 
 
 ### upload
 
-1. Doctor, the clean tree, the branch and `origin`, as `ios upload`. The next tag is `DEPLOY_TAG_PREFIX` plus the number of upload tags plus one; that number is the bundle's versionCode (`ANDROID_VERSION_CODE` for Gradle).
+1. Doctor, the clean tree, the branch and `origin`, as `ios upload`. The next tag is `DEPLOY_TAG_PREFIX` plus the number of upload tags plus `ANDROID_FIRST_VERSION_CODE` (default 1); that number is the bundle's versionCode (`ANDROID_VERSION_CODE` for Gradle).
 2. Asks before it goes on, unless `--force`. Tags the commit, and pushes the tag when there is an `origin`.
 3. Builds `:app:bundleRelease` signed with the upload key, without the Gradle daemon, then checks it as `preflight` does and verifies its signature with `jarsigner` against the key's SHA-256.
 4. Uploads it to the `internal` track (`publishReleaseBundle`, the notes as `src/release/play/release-notes/en-US/default.txt`, removed after), then promotes it to each other track of `ANDROID_PLAY_TRACKS`.
 5. Annotates the tag with the versionCode, commit, time, tracks and notes, and logs the upload in `.watch/deploy.log`.
 
-`--dry-run` runs steps 1 and 3 and stops: no question, no tag, nothing sent to Play, and uncommitted changes only warn. Without an upload key it signs with a throwaway key it makes in `build/upload/THROWAWAY-dry-run-key-NOT-the-Play-upload-key.p12`, which Play would refuse. With the upload key it gives the signed bundle for the first upload, which Play takes only by hand in Play Console. After that upload, tag its commit `git tag -a android/v1 -m "build: 1 | first upload by hand"`, so the next upload's versionCode is 2.
+`--dry-run` runs steps 1 and 3 and stops: no question, no tag, nothing sent to Play, and uncommitted changes only warn. Without an upload key it signs with a throwaway key it makes in `build/upload/THROWAWAY-dry-run-key-NOT-the-Play-upload-key.p12`, which Play would refuse. With the upload key it gives the signed bundle for the first upload, which Play takes only by hand in Play Console. After that upload, tag its commit `git tag -a android/v1 -m "build: 1 | first upload by hand"`, so the next upload's versionCode is 2. `ANDROID_FIRST_VERSION_CODE` (default 1) numbers the first upload instead: with 3, the first tag is `android/v3` and the next upload's versionCode is 4.
 
 The secrets come from the environment, else from `keychain()` refs in the project's gitignored `.env.local`, read with `varlock printenv` as the server reads its own:
 

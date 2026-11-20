@@ -1,5 +1,5 @@
 # toolkit/shared/sentry.sh — generic Sentry queries (gated by TOOLKIT_SENTRY_ENABLED)
-# Provides: _sentry_auth_token, _sentry_events, _sentry_issues, _sentry_event_detail, _sentry_dispatch
+# Provides: _sentry_auth_token, _sentry_events, _sentry_issues, _sentry_event_detail, _sentry_setup, _sentry_dispatch
 # Depends on: PROJECT_ROOT, SENTRY_ORG (loaded by platform _load_config)
 
 # ── Auth ──────────────────────────────────────────────────────────────
@@ -116,6 +116,46 @@ _sentry_resolve() {
     done
 }
 
+# Makes the project in SENTRY_ORG when it isn't there yet, under the org's
+# first team, and prints its DSN. The token needs project:write to make one.
+_sentry_setup() {
+    local project="$1" platform="${2:-}"
+    local token api="https://sentry.io/api/0" status team body
+    token=$(_sentry_auth_token)
+    if [[ -z "$token" ]]; then
+        echo "✗ No Sentry token: export SENTRY_AUTH_TOKEN or add ~/.sentryclirc"
+        return 1
+    fi
+    status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" "$api/projects/${SENTRY_ORG}/${project}/")
+    if [[ "$status" == "200" ]]; then
+        echo "✓ The project $project is in $SENTRY_ORG"
+    elif [[ "$status" == "404" ]]; then
+        team=$(curl -s -H "Authorization: Bearer $token" "$api/organizations/${SENTRY_ORG}/teams/" | jq -r '.[0].slug // empty')
+        if [[ -z "$team" ]]; then
+            echo "✗ $SENTRY_ORG has no team to put $project under, or the token can't list them"
+            return 1
+        fi
+        body=$(jq -n --arg name "$project" --arg platform "$platform" '{name: $name, slug: $name} + (if $platform == "" then {} else {platform: $platform} end)')
+        status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            -d "$body" "$api/teams/${SENTRY_ORG}/${team}/projects/")
+        if [[ "$status" != "201" ]]; then
+            echo "✗ Sentry refused to make $project (HTTP $status). The token may lack project:write: make it in Sentry, then run this again."
+            return 1
+        fi
+        echo "✓ Made the project $project in $SENTRY_ORG (team $team)"
+    else
+        echo "✗ Sentry answered HTTP $status for the project $project"
+        return 1
+    fi
+    local dsn
+    dsn=$(curl -s -H "Authorization: Bearer $token" "$api/projects/${SENTRY_ORG}/${project}/keys/" | jq -r '[.[] | select(.isActive)][0].dsn.public // empty')
+    if [[ -z "$dsn" ]]; then
+        echo "✗ No active key on $project"
+        return 1
+    fi
+    echo "DSN: $dsn"
+}
+
 _sentry_usage() {
     cat <<EOF
 Usage: ./build.sh sentry <command>
@@ -126,6 +166,7 @@ Commands:
   event <id>        Show full event JSON with breadcrumbs
   issue <short-id> [all]  An issue's tags and its latest event in short (frames, breadcrumbs)
   resolve <short-id>...  Mark issues resolved
+  setup [platform]  Make the project when it is missing, and print its DSN
 EOF
 }
 
@@ -138,6 +179,7 @@ _sentry_dispatch() {
         event)  _sentry_event_detail "$project" "$2" ;;
         issue)  _sentry_issue "$2" "${3:-}" ;;
         resolve) shift; _sentry_resolve "$@" ;;
+        setup)  _sentry_setup "$project" "${2:-}" ;;
         *)      _sentry_usage ;;
     esac
 }

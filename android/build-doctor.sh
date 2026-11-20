@@ -321,10 +321,12 @@ _doctor_postgres() {
 }
 
 _doctor_project() {
-    if [[ -f "$PROJECT_ROOT/toolkit/shared/build-utils.sh" ]]; then
+    # The toolkit this script runs from: android/toolkit in a project of its
+    # own, ../toolkit in a repository that holds the iOS app too.
+    if [[ -f "$SCRIPT_DIR/../shared/build-utils.sh" ]]; then
         _doctor_report ok toolkit "toolkit/ checked out"
     else
-        _doctor_report fail toolkit "toolkit/ is empty in $PROJECT_ROOT" "git -c protocol.file.allow=always submodule update --init"
+        _doctor_report fail toolkit "the toolkit at $SCRIPT_DIR/.. is incomplete" "git -c protocol.file.allow=always submodule update --init"
     fi
     if [[ -f "$PROJECT_ROOT/build.properties.local" ]]; then
         _doctor_report ok "local properties" "build.properties.local present"

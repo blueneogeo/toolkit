@@ -411,7 +411,9 @@ _do_upload() {
     else
         local count
         count=$(git -C "$PROJECT_ROOT" tag -l "${tag_prefix}*" | wc -l | xargs)
-        new_tag="${tag_prefix}$((count + 1))"
+        # ANDROID_FIRST_VERSION_CODE numbers the first upload, for a project
+        # whose lower numbers mean something else (debug builds, say).
+        new_tag="${tag_prefix}$((count + ${ANDROID_FIRST_VERSION_CODE:-1}))"
         current_label="${current_tag:-(none)}"
     fi
     _UPLOAD_VERSION_CODE="${new_tag#"$tag_prefix"}"
