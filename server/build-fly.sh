@@ -384,6 +384,53 @@ _cluster_healthy() {
     return 2
 }
 
+# Stages on Fly each secret of the schema that has a value here and that is
+# new since the last sync (a hash of the value is kept in
+# .watch/secrets-sent, never the value), or that Fly doesn't have. A secret
+# the schema lists but that is empty here is left alone. Staged secrets are
+# applied by the deploy that follows, with the new image, so the machines
+# don't restart on the old one first. Uses DRY_RUN and FLY_APP.
+_stage_secrets() {
+    local sent_file="$PROJECT_ROOT/.watch/secrets-sent"
+    mkdir -p "$(dirname "$sent_file")"
+    touch "$sent_file"
+
+    local current_json
+    current_json=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null || echo "[]")
+
+    local secrets_args=() changed=() sums=() var_name var_desc value sum on_fly sent
+    while IFS='|' read -r var_name var_desc; do
+        value="$(varlock printenv "$var_name" --path "$PROJECT_ROOT/" 2>/dev/null)"
+        [[ -n "$value" ]] || continue
+        sum=$(printf '%s' "$value" | shasum -a 256 | cut -c1-64)
+        on_fly=$(echo "$current_json" | jq -r --arg name "$var_name" 'any(.[]; .name == $name)' 2>/dev/null)
+        sent=$(awk -v name="$var_name" '$1 == name { print $2 }' "$sent_file")
+        if [[ "$on_fly" != "true" || "$sum" != "$sent" ]]; then
+            secrets_args+=("${var_name}=${value}")
+            changed+=("$var_name")
+            sums+=("$var_name $sum")
+        fi
+    done < <(_get_sensitive_vars)
+
+    if [[ ${#changed[@]} -eq 0 ]]; then
+        echo "  ✓ secrets unchanged — skipping sync"
+        return 0
+    fi
+    local out="$PROJECT_ROOT/.watch/secrets.log" line
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "  → would stage ${#changed[@]} secrets on Fly: ${changed[*]}"
+    elif fly secrets set --stage --app "$FLY_APP" "${secrets_args[@]}" > "$out" 2>&1; then
+        echo "  ✓ staged on Fly, applied by this deploy: ${changed[*]}"
+        for line in "${sums[@]}"; do
+            awk -v name="${line%% *}" '$1 != name' "$sent_file" > "$sent_file.tmp" && mv "$sent_file.tmp" "$sent_file"
+            echo "$line" >> "$sent_file"
+        done
+    else
+        echo "  ⚠ secrets sync failed — deploy will proceed with existing secrets"
+        echo "    Full log: $out"
+    fi
+}
+
 _fly_deploy() {
     local deploy_text=""
     local DRY_RUN=0
@@ -539,57 +586,7 @@ _fly_deploy() {
     echo ""
     echo "[4/8] Secrets sync"
     if command -v varlock &>/dev/null && [[ -f "$PROJECT_ROOT/.env.schema" ]]; then
-        local _secrets_cache="$PROJECT_ROOT/.watch/secrets-cache.json"
-        mkdir -p "$(dirname "$_secrets_cache")"
-
-        local current_json
-        current_json=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null || echo "[]")
-
-        local do_sync=1
-        if [[ -f "$_secrets_cache" ]]; then
-            do_sync=0
-            while IFS='|' read -r var_name var_desc; do
-                local fly_digest
-                fly_digest=$(echo "$current_json" | jq -r --arg name "$var_name" '.[] | select(.name==$name) | .digest // ""' 2>/dev/null)
-                local cached_digest
-                cached_digest=$(jq -r --arg name "$var_name" '.[] | select(.name==$name) | .digest // ""' "$_secrets_cache" 2>/dev/null)
-                if [[ -z "$fly_digest" || "$fly_digest" != "$cached_digest" ]]; then
-                    do_sync=1
-                    break
-                fi
-            done < <(_get_sensitive_vars)
-        fi
-
-        if [[ $do_sync -eq 0 ]]; then
-            echo "  ✓ secrets unchanged — skipping sync"
-        else
-            local secrets_args=()
-            local synced=0
-            while IFS='|' read -r var_name var_desc; do
-                local value
-                value="$(varlock printenv "$var_name" --path "$PROJECT_ROOT/" 2>/dev/null)"
-                if [[ -n "$value" ]]; then
-                    secrets_args+=("${var_name}=${value}")
-                    synced=1
-                fi
-            done < <(_get_sensitive_vars)
-
-            if [[ $synced -eq 0 ]]; then
-                echo "  ✗ varlock produced no output — secrets sync failed"
-                return 1
-            fi
-
-            local _secrets_out="$PROJECT_ROOT/.watch/secrets.log"
-            if [[ $DRY_RUN -eq 1 ]]; then
-                echo "  → would sync ${#secrets_args[@]} secrets to Fly"
-            elif fly secrets set --app "$FLY_APP" "${secrets_args[@]}" > "$_secrets_out" 2>&1; then
-                echo "  ✓ secrets synced to Fly"
-                fly secrets list --app "$FLY_APP" --json 2>/dev/null > "$_secrets_cache" || true
-            else
-                echo "  ⚠ secrets sync failed — deploy will proceed with existing secrets"
-                echo "    Full log: $_secrets_out"
-            fi
-        fi
+        _stage_secrets
     else
         echo "  ⚠ varlock or .env.schema missing — skipping secrets sync"
     fi
