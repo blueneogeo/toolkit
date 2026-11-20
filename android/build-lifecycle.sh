@@ -2,7 +2,7 @@
 # android-toolkit/build-lifecycle.sh: install, launch, stop and uninstall the app
 # Sourced by build.sh.
 #
-# Provides: _find_apk, _app_id, _app_running, _terminate_app, _install_app,
+# Provides: _find_apk, _app_id, _app_running, _terminate_app, _installed_apk_matches, _install_app,
 #           _launch_app, _am_start, _reverse_server_port, _use_target,
 #           _install_without_launch, do_install, do_launch, do_uninstall, do_watch
 # Depends on: SERIAL, _select_android_target, _target_label (build-device.sh)
@@ -94,12 +94,30 @@ _reverse_server_port() {
     fi
 }
 
+# Whether the device already has this very APK. Installing it again would
+# still replace the app, and Android removes an app's notifications when it
+# is replaced, so a launch right after a push would lose its notification.
+_installed_apk_matches() {
+    local apk="$1" app_id path remote ours
+    app_id=$(_app_id) || return 1
+    path=$("$ADB" -s "$SERIAL" shell pm path "$app_id" 2>/dev/null | tr -d '\r' | sed -n 's/^package://p')
+    # Not installed, or split into several APKs: install.
+    [[ -n "$path" && "$path" != *$'\n'* ]] || return 1
+    remote=$("$ADB" -s "$SERIAL" shell sha256sum "$path" 2>/dev/null | awk '{print $1}')
+    ours=$(shasum -a 256 "$apk" | awk '{print $1}')
+    [[ -n "$remote" && "$remote" == "$ours" ]]
+}
+
 _install_app() {
     local apk
     apk=$(_find_apk)
     if [[ -z "$apk" ]]; then
         echo "✗ No APK for the $(_build_config) build. Build first."
         return 1
+    fi
+    if _installed_apk_matches "$apk"; then
+        echo "✓ This build is already installed on $(_target_label)"
+        return 0
     fi
     echo "→ Installing on $(_target_label)"
     local out
@@ -133,8 +151,11 @@ _main_component() {
         | tr -d '\r' | grep '/' | tail -1
 }
 
-# Starts the app fresh (-S stops a running one) with am start extras, plus
-# ANDROID_LAUNCH_ARGS.
+# Starts the app fresh with am start extras, plus ANDROID_LAUNCH_ARGS. A
+# running app is ended first: with am kill when it is in the background, as
+# Android ends it, and with -S (a force stop) only when that leaves it running.
+# A force stop also removes the app's notifications, so a launch after a push
+# must not use one needlessly.
 _am_start() {
     local app_id="$1"
     shift
@@ -146,7 +167,13 @@ _am_start() {
     fi
     local extra=()
     read -r -a extra <<< "${ANDROID_LAUNCH_ARGS:-}"
-    local cmd="am start -W -S -n $(_device_quote "$component")" arg
+    local stop=""
+    if [[ -n "$(_app_pid "$app_id")" ]]; then
+        "$ADB" -s "$SERIAL" shell am kill "$app_id" 2>/dev/null || true
+        sleep 0.5
+        [[ -z "$(_app_pid "$app_id")" ]] || stop=" -S"
+    fi
+    local cmd="am start -W$stop -n $(_device_quote "$component")" arg
     for arg in "$@" ${extra[@]+"${extra[@]}"}; do
         cmd+=" $(_device_quote "$arg")"
     done
