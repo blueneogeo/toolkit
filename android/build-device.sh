@@ -18,11 +18,25 @@ _is_emulator_serial() {
     [[ "$1" == emulator-* ]]
 }
 
+# The AVD name of a running emulator, as its system reports it. Reading it
+# inside the guest leaves the emulator's console alone: a console command to
+# another person's emulator, made only to learn its name, has been seen to
+# coincide with that emulator aborting. Images without the property fall back
+# to the console.
+_avd_name() {
+    local name
+    name=$("$ADB" -s "$1" shell getprop ro.boot.qemu.avd_name 2>/dev/null | tr -d '\r')
+    if [[ -z "$name" ]]; then
+        name=$("$ADB" -s "$1" emu avd name 2>/dev/null | head -1 | tr -d '\r')
+    fi
+    echo "$name"
+}
+
 # Serials of running emulators whose AVD has this name.
 _serials_of_avd() {
     local serial
     for serial in $(_connected_serials | grep '^emulator-' || true); do
-        if [[ "$("$ADB" -s "$serial" emu avd name 2>/dev/null | head -1 | tr -d '\r')" == "$1" ]]; then
+        if [[ "$(_avd_name "$serial")" == "$1" ]]; then
             echo "$serial"
         fi
     done
@@ -102,7 +116,7 @@ _pick_one() {
 _target_label() {
     if _is_emulator_serial "$SERIAL"; then
         local avd
-        avd=$("$ADB" -s "$SERIAL" emu avd name 2>/dev/null | head -1 | tr -d '\r')
+        avd=$(_avd_name "$SERIAL")
         echo "emulator${avd:+ $avd} ($SERIAL)"
     else
         local model

@@ -115,7 +115,7 @@ _emulator_serial() {
 _emulator_restart() {
     _emulator_serial "${1:-}" || return 1
     local serial="$SERIAL" avd waited=0
-    avd=$("$ADB" -s "$serial" emu avd name 2>/dev/null | head -1 | tr -d '\r')
+    avd=$(_avd_name "$serial")
     if [[ -z "$avd" ]]; then
         echo "✗ Could not read the AVD name of $serial."
         return 1
