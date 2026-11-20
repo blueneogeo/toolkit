@@ -246,6 +246,19 @@ do_watch() {
     done < <(fswatch --latency 0.5 "$PROJECT_ROOT/" 2>/dev/null)
 }
 
+# The tests that reach a server over the network run as a program built to
+# a fixed path in build/. go test builds into a new temporary folder on every
+# run, so a firewall such as Little Snitch would ask about each run again
+# and hold its connections while it waits.
+_run_net_test() {
+    local tags="$1" pkg="$2"
+    shift 2
+    local bin="$PROJECT_ROOT/build/${pkg##*/}.test"
+    mkdir -p "$PROJECT_ROOT/build"
+    (cd "$PROJECT_ROOT" && go test -c -tags="$tags" -o "$bin" "$pkg") || return 1
+    (cd "$PROJECT_ROOT/$pkg" && "$bin" -test.v -test.count=1 "$@")
+}
+
 _require_server() {
     local url="${1:-${SERVER_HEALTH_URL:-http://localhost:8080/api/health}}"
     if ! curl -sf "$url" >/dev/null 2>&1; then
@@ -297,7 +310,7 @@ do_test() {
             rm -f "$test_log"
             return 1
         fi
-        (cd "$PROJECT_ROOT" && E2E_HEADERS_RUN="$3" go test -timeout 120s -tags=e2e ./internal/e2e -run '^TestInboxHeaders$' -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
+        (export E2E_HEADERS_RUN="$3"; _run_net_test e2e ./internal/e2e -test.timeout 120s -test.run '^TestInboxHeaders$') 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "e2e" ]; then
         # Plays Turn's users against a running server through its API and
         # reads the emails that really arrive (internal/e2e).
@@ -320,11 +333,11 @@ do_test() {
         # A full run waits for real mail; the default test timeout is too short.
         [[ "$timeout" == "${TEST_TIMEOUT}s" ]] && timeout="600s"
         echo "→ End-to-end test against $e2e_url"
-        (cd "$PROJECT_ROOT" && E2E_BASE_URL="$e2e_url" E2E_MAIL_DIR="$PROJECT_ROOT/build/e2e-mail/${2:-local}" go test -timeout "$timeout" -tags=e2e ./internal/e2e -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
+        (export E2E_BASE_URL="$e2e_url" E2E_MAIL_DIR="$PROJECT_ROOT/build/e2e-mail/${2:-local}"; _run_net_test e2e ./internal/e2e -test.timeout "$timeout") 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "local" ]; then
         export APP_BASE_URL="http://localhost:${SERVER_PORT}"
         _require_server
-        (cd "$PROJECT_ROOT" && go test -timeout "$timeout" -tags=live ./internal/livetest -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
+        _run_net_test live ./internal/livetest -test.timeout "$timeout" 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "live" ]; then
         _load_env
         local live_url="${LIVE_BASE_URL:-}"
@@ -338,7 +351,7 @@ do_test() {
         fi
         export APP_BASE_URL="$live_url"
         _require_server "$live_url/api/health"
-        (cd "$PROJECT_ROOT" && go test -timeout "$timeout" -tags=live ./internal/livetest -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
+        _run_net_test live ./internal/livetest -test.timeout "$timeout" 2>&1 | tee "$test_log" || test_exit=$?
     elif [ "${1:-}" = "run" ]; then
         (cd "$PROJECT_ROOT" && go test -timeout "$timeout" "${3:-./...}" -run "${2:?Usage: test run <pattern> [package]}" -v -count=1) 2>&1 | tee "$test_log" || test_exit=$?
     else
