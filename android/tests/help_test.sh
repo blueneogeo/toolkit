@@ -4,9 +4,9 @@
 #
 #   bash toolkit/android/tests/help_test.sh
 #
-# Per command: --help exits 0 and prints text; a flag in the command's own usage
-# text or in its usage line is in its README rows or section, and a flag in its
-# README rows is in its help. Prints one line per failed case and the count;
+# Per command: --help exits 0 and prints text; a flag in the command's help or in
+# its line in the list of commands is in its README rows or section, and a flag
+# in its README rows is in its help. Prints one line per failed case and the count;
 # exits 1 when one failed.
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,12 +61,10 @@ for line in open(readme, encoding="utf-8"):
 PY
 }
 
-# The command's lines in the general usage list: its signature lines only.
+# The command's lines in the list of all commands (build-help.txt): their
+# usage, without the summary.
 _usage_signature() {
-    usage | awk -v cmd="$1" '
-        $0 ~ "^    " cmd "( |$)" { keep = 1; print; next }
-        keep && /^ +\[/ { print; next }
-        { keep = 0 }'
+    usage | awk -v cmd="$1" '$0 ~ "^  " cmd "( |$)" { sub(/  +[A-Z].*$/, ""); print }'
 }
 
 # ANDROID_COMMANDS and the dispatch's case labels agree.
@@ -107,7 +105,7 @@ done
 
 out=$(_dispatch nothing --help 2>&1)
 code=$?
-[[ $code -eq 1 && "$out" == *"Unknown android command: nothing"* ]] && PASSED=$((PASSED + 1)) || _fail "unknown command --help: exit $code"
+[[ $code -eq 1 && "$out" == *'No command "nothing"'* ]] && PASSED=$((PASSED + 1)) || _fail "unknown command --help: exit $code"
 
 [[ ! -s "$WORK/adb.log" ]] && PASSED=$((PASSED + 1)) || _fail "--help called adb: $(head -3 "$WORK/adb.log")"
 

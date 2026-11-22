@@ -168,18 +168,27 @@ _detect_project_config() {
 
 # ── Simulator discovery ─────────────────────────────────────────────
 
-_SIM_NAME=""
-_SIM_ID=""
-_SIM_OS=""
-if command -v xcrun &>/dev/null; then
-    _SIM_NAME=$(xcrun simctl list devices available 2>/dev/null | grep -E "iPhone [0-9]" | head -1 | sed -E 's/^[[:space:]]*//' | sed -E 's/ \([A-F0-9\-]+\) \(.*$//' || true)
-    _SIM_ID=$(xcrun simctl list devices available 2>/dev/null | grep -E "iPhone [0-9]" | head -1 | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}' || true)
-    _SIM_OS=$(xcrun simctl list runtimes 2>/dev/null | grep "iOS" | head -1 | sed -E 's/.*\(([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/' || true)
-fi
-SIM_NAME="${SIM_NAME:-$_SIM_NAME}"
-SIM_ID="${SIM_DEVICE_ID:-$_SIM_ID}"
-SIM_OS="${SIM_OS_VERSION:-$_SIM_OS}"
-SIM_DEST="platform=iOS Simulator,name=${SIM_NAME},OS=${SIM_OS}"
+# The first available iPhone simulator and the newest iOS runtime, unless
+# SIM_NAME, SIM_DEVICE_ID and SIM_OS_VERSION say otherwise. _dispatch calls it
+# after the help check.
+_detect_default_simulator() {
+    _SIM_NAME=""
+    _SIM_ID=""
+    _SIM_OS=""
+    if command -v xcrun &>/dev/null; then
+        _SIM_NAME=$(xcrun simctl list devices available 2>/dev/null | grep -E "iPhone [0-9]" | head -1 | sed -E 's/^[[:space:]]*//' | sed -E 's/ \([A-F0-9\-]+\) \(.*$//' || true)
+        _SIM_ID=$(xcrun simctl list devices available 2>/dev/null | grep -E "iPhone [0-9]" | head -1 | grep -oE '[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}' || true)
+        _SIM_OS=$(xcrun simctl list runtimes 2>/dev/null | grep "iOS" | head -1 | sed -E 's/.*\(([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/' || true)
+    fi
+    SIM_NAME="${SIM_NAME:-$_SIM_NAME}"
+    SIM_ID="${SIM_DEVICE_ID:-$_SIM_ID}"
+    SIM_OS="${SIM_OS_VERSION:-$_SIM_OS}"
+    SIM_DEST="platform=iOS Simulator,name=${SIM_NAME},OS=${SIM_OS}"
+}
+SIM_NAME="${SIM_NAME:-}"
+SIM_ID="${SIM_DEVICE_ID:-}"
+SIM_OS="${SIM_OS_VERSION:-}"
+SIM_DEST=""
 
 # ── Device discovery ────────────────────────────────────────────────
 
@@ -1061,36 +1070,7 @@ do_see() {
 # ── UI driving (baguette) ───────────────────────────────────────────
 
 _ui_usage() {
-    cat <<'EOF'
-Usage: ./build.sh ios ui <command> [<args>]
-
-  Drive and inspect the booted simulator's UI (simulator only).
-  Interactions auto-capture a screenshot afterwards; the path is printed last.
-
-    tap <x> <y>        Tap at device points (402x874 on iPhone 17 Pro)
-    tap --id <id>      Tap the element with this accessibility identifier
-    tap --label <txt>  Tap the first element whose accessibility label matches
-    swipe <x1> <y1> <x2> <y2>
-                       Drag from one point to another
-    swipe <dir>        Full-screen swipe: up | down | left | right
-    type <text>        Type into the currently focused field
-    press <button>     Press a hardware button: home | lock
-    describe [name]    Print the accessibility tree (role | label | id | frame)
-                       and save it to ios/build/screenshots/<name>-ui.txt
-
-Options:
-    --no-shot          Skip the automatic screenshot after the action
-    --delay <ms>       Settle time before the screenshot (default: 700)
-    --device, -d <name|udid>
-                       Target a specific simulator by its exact name or UDID.
-                       Defaults to the booted simulator.
-
-Examples:
-    ./build.sh ios ui tap --id record-primary-button
-    ./build.sh ios ui swipe up                        # scroll the feed
-    ./build.sh ios ui type "Family calls"
-    ./build.sh ios ui describe feed
-EOF
+    usage ui
 }
 
 _ui_require_baguette() {
@@ -1239,28 +1219,7 @@ _ui_bag_run() {
 _SIM_TEXT_SIZES="extra-small small medium large extra-large extra-extra-large extra-extra-extra-large accessibility-medium accessibility-large accessibility-extra-large accessibility-extra-extra-large accessibility-extra-extra-extra-large"
 
 _simulator_usage() {
-    cat <<EOF
-Usage: ./build.sh ios simulator <command>
-
-  create <model> [name]
-                       Make a simulator of that model (e.g. "iPhone 13 mini") on the
-                       newest iOS runtime (SIM_OS_VERSION picks another), unless one of
-                       that name exists; prints its UDID. The name defaults to the
-                       model. Use it as the target of install, debug, screenshot and
-                       the like.
-  front <simulator>    Bring the app back to the front on that simulator, as a tap on
-                       its icon does: the running process carries on, nothing is
-                       installed or restarted.
-  contact <simulator> <file.vcf>
-                       Add the vCard's contacts to that simulator's Contacts and
-                       let the app read them, without the system asking.
-  restart <simulator>  Shut that simulator down and start it again, with fresh
-                       system services (its sound among them).
-  text-size [size]     Set the simulator's text size (Dynamic Type); no size prints
-                       the current one. --device <name|udid> picks the simulator,
-                       else the booted one. large is the default. Sizes:
-                       $_SIM_TEXT_SIZES
-EOF
+    usage simulator
 }
 
 do_simulator() {
@@ -3363,121 +3322,19 @@ do_portal() {
 
 # ── Dispatch ────────────────────────────────────────────────────────
 
+# The list of commands, or the help of the commands the arguments name
+# (build-help.txt beside this file, then the project's own build-help.txt).
 usage() {
-    cat <<EOF
-Usage: ./build.sh ios [--device <name|udid>] [--server] <command> [<args>]
-
-  Append [--server] to run a relay-allowlisted command on the user-launched
-  build server instead of locally (automatic inside scode sandboxes).
-  Non-allowlisted commands run locally despite the flag.
-
-  Target selection (install/uninstall/watch/screenshot/see):
-    The optional target after the command is: device | simulator | <name|udid>.
-    No target = auto: prefer a connected physical phone, else the booted simulator.
-    'device' = the connected phone; with several phones connected, pick one via
-    --device or IOS_DEVICE (or pass its name/UDID as the target directly).
-
-  Local dev:
-    setup              First-time setup: config + generate + build + LSP config (sim only)
-                       --renew-profiles: renew the App Store profiles (after adding a capability or target)
-    update-toolkit     Update the toolkit submodule to the latest version
-    configure          Enable/configure external services (Sentry, upload, e2e, server) — idempotent
-    build              Lint → format → incremental build
-    clean              Clean build artifacts
-    install [target] [--quiet|-q]   Build + launch (--quiet skips opening Device Hub)
-    launch [target] -- [args...]    Launch installed app, forwarding args to it
-    uninstall [target] Stop watcher + app + uninstall
-    watch [target] [mode]  Build + launch + auto-redeploy (mode: swift|build, default: swift)
-    screenshot [target] [name]
-                       Capture the connected phone's or booted simulator's screen to
-                       ios/build/screenshots/ (no build/launch). A lone argument is
-                       the screenshot name, unless exactly one connected phone
-                       matches it — then it is that phone's target.
-    screenshots collect [simulator]
-                       Copy scripted in-app screenshots out of the sim container into
-                       ios/build/screenshots/ (a simulator's name or UDID picks which one)
-    push <payload.json>
-                       Deliver an APNs payload to the app on the booted simulator; it is
-                       shown directly, without running a notification service extension
-    simulator <create <model> [name]|front <sim>|contact <sim> <vcf>|text-size [size]>
-                       Make a simulator of another model (e.g. "iPhone 13 mini"), bring
-                       the app to the front, add contacts the app may read, or set the
-                       booted simulator's text size (Dynamic Type).
-    profile [target] [--script <names>] [--seconds N] [--render] [--template <name>] [--name <label>]
-                       Record an Instruments trace (Time Profiler by default) of the app on
-                       the connected phone or booted simulator and print the frame rate and
-                       heaviest functions. --script launches the app running debug scripts
-                       (e.g. a scripted swipe) so the interaction is measured; --render adds
-                       render-server and GPU frame times and offscreen passes. Traces go to
-                       build/traces/.
-    see [target] [--focus "<q>"]
-                       Capture the phone/simulator screen and describe it with the
-                       vision model (--focus optional)
-    record [simulator] [name] [--seconds N] [--script <names>] [--frames <fps>]
-                       Record the simulator's screen to ios/build/recordings/<name>.mp4;
-                       --script films debug scripts from launch, --frames cuts frames
-                       and contact sheets ('./build.sh ios record --help'; simulator only)
-    ui <command>       Drive the simulator UI (baguette): tap | swipe | type | press | describe
-                       ('./build.sh ios ui' shows the full help; simulator only)
-    test [filter] [timeout] [--no-build|--build-only]
-                       Run unit tests; filter by class name, timeout in seconds (default $TEST_TIMEOUT).
-                       --no-build skips the build; --build-only builds the tests without running them
-                       (and without the local server)
-    tsan-test [filter] [timeout] [--no-build|--build-only]   Run unit tests with ThreadSanitizer; same as test
-    lint               SwiftLint, SwiftFormat and the toolkit's gates on the app, its tests and
-                       debug scripts, then the project's own lint.sh if it has one
-    format             Auto-format the app, its tests and debug scripts with SwiftFormat
-    unused             Scan for unused code with Periphery (builds for the simulator)
-    portal [prefix...] Read-only: bundle ids, their capabilities and profiles from the
-                       App Store Connect API (default prefix: the app's bundle id)
-    analyze            Run Xcode static analyzer (memory, logic, dead stores)
-    audit              Run all analysis tools: lint + format-check + unused + analyze
-    doctor             Check local build prerequisites
-    logs [target] [--cat <cat>] [--level <level>] [--process <name|all>] [--minutes M] [N]
-                 Show the last N lines (default 10) of the last M minutes (default 15),
-                 from the app, another process (e.g. ANECompilerService) or all of them
-    logs [target] [--cat <cat>] [--level <level>] tail  Stream live app logs
-    debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build]
-                         Build (or with --no-build, just relaunch), launch, and trace logs (auto-stop on background)
-    signin [simulator|<name|udid>] [email code]
-                       Sign a simulator in with SCRIPT_ENV_<PROJECT>_LOGIN_EMAIL / _CODE from
-                       build.properties.local, or with the given account and its fixed code
-                       (runs the sign_in debug script, no rebuild)
-    signout [simulator|<name|udid>]
-                       Sign a simulator out (runs the sign_out debug script)
-
-  Online (enable via setup / build.properties):
-    e2e              Run UI tests against a configured server (TOOLKIT_E2E_ENABLED)
-    e2e-run          Run built e2e tests without rebuilding (TOOLKIT_E2E_ENABLED)
-    upload [--force] <text>
-                       Build, sign, upload to TestFlight (TOOLKIT_UPLOAD_ENABLED)
-    preflight          The upload's Release build and its checks, without uploading
-    sentry <cmd>     Sentry queries (TOOLKIT_SENTRY_ENABLED)
-
-Options:
-    --device, -d <name|udid>   Pick which connected phone 'device' means when several
-                               are connected. Also works with a name/UDID target.
-                               Example: ./build.sh ios --device "iPhone 15" screenshot
-
-    --server                   Run a relay-allowlisted command on the user-launched
-                               build server instead of locally.
-                               Example: ./build.sh ios --server test
-
-    --config, -c <name>        Build configuration for build, install, launch, watch,
-                               debug, test and profile: debug (default), profile
-                               (optimised, still the development app and server) or
-                               release (the App Store build; it can't be installed
-                               directly). IOS_CONFIG sets a default.
-                               Example: ./build.sh ios --config profile install device
-
-    IOS_DEVICE=<name|udid>     Environment variable fallback for --device.
-    IOS_LAUNCH_ARGS="<args>"   Extra launch arguments for every simulator launch.
-                               Set once to always target the same device.
-                               Example: export IOS_DEVICE="iPhone 15"
-EOF
+    _help_show "./build.sh ios" "$SCRIPT_DIR/build-help.txt" "$PROJECT_ROOT/build-help.txt" -- "$@"
 }
 
 _dispatch() {
+    # Help first: it never builds, uploads or touches a device.
+    if _help_asked "$@"; then
+        usage "$@"
+        return $?
+    fi
+    _detect_default_simulator
     local _NEW_ARGS=()
     local op="" code=0
     while [[ $# -gt 0 ]]; do

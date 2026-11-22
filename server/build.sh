@@ -772,63 +772,10 @@ do_local_logs() {
     fi
 }
 
+# The list of commands, or one command's help (build-help.txt beside this file,
+# then the project's own build-help.txt).
 usage() {
-    cat <<EOF
-Usage: ./build.sh server [--server] <command> (--server accepted in any position)
-  Append [--server] to run a relay-allowlisted command on the user-launched
-  build server instead of locally (automatic inside scode sandboxes).
-  Non-allowlisted commands run locally despite the flag.
-  Local dev:
-    build        Compile Go binary
-    clean        Remove build artifacts (bin/, .watch/)
-    start        Build + start in background
-    stop         Stop server
-    status       Show local server health + metrics
-    logs [N]     Show last N formatted log lines (default 10)
-    logs tail    Stream formatted server logs
-    debug        Stream raw server log lines (for combined debug)
-    watch        Start + auto-rebuild on Go changes
-    test [N] [subcommand]    Run all Go tests + lint (timeout in seconds, default $TEST_TIMEOUT)
-    test run <pattern> [pkg] Run the Go tests matching a -run pattern (package default ./...)
-    test local               Check local server self-test health
-    test live                Check production server self-test health
-    test e2e [local|live] [test]  End-to-end test: sign-up, invites, pushes, replies,
-                             emails and every link in them, against a running
-                             server (needs RESEND_API_KEY, E2E_INBOX_DOMAIN);
-                             keeps each email in build/e2e-mail/
-    test e2e headers <run>   Full headers of every email a run received
-    lint         Run golangci-lint
-    format       Auto-format all Go sources (golangci-lint --fix)
-    doctor       Check local server build prerequisites
-    docs         Generate OpenAPI/Swagger spec from handler annotations
-    sqlc         Regenerate sqlc code from db/queries/*.sql
-    deps <mod>   Add Go modules (module[@version]) to go.mod; 'deps tidy' tidies it
-    migrate up              Run all pending up migrations
-    migrate down            Run 1 down migration (default)
-    migrate down N          Run N down migrations
-    migrate down all        Run all down migrations
-    sql <query>             Execute a SQL query on the local database
-    apns-setup   Set up push notification key
-    email-setup  Set up Resend API key for email invites
-    setup        Set up local development environment (db, secrets, push, email)
-
-  Live (remote):
-    live status       Show app health, URL, machines, and metrics
-    live logs [N]     Show last N lines from Fly log buffer (default 10)
-    live logs tail    Stream live Fly logs
-    live deploy [--dry-run] [--strategy rolling|immediate] [--force] <text>   Pre-check, snapshot DB, deploy, verify self-test
-    live rollback [--dry-run] [--force]  Restore DB from backup + redeploy app
-    live snapshots    List database backups
-    live sql [--write [--force]] '<sql>'  Run SQL on the live database in one
-                      transaction; read-only unless --write, which asks and backs up first
-    live clusters [org]   List MPG clusters (active + deleted); org optional
-    live deployments  List deploy and rollback tags
-    live releases     Show deployment history
-    live machines     List individual VM status
-    live setup        Configure CI (Fly token + GitHub Actions secrets)
-    live ci-setup     CI/CD pipeline configuration
-    live sentry       Sentry queries for server project
-EOF
+    _help_show "./build.sh server" "$TOOLKIT_DIR/build-help.txt" "$PROJECT_ROOT/build-help.txt" -- "$@"
 }
 
 _dispatch_sentry() {
@@ -840,6 +787,11 @@ _dispatch_sentry() {
 }
 
 _dispatch() {
+    # Help first: it never builds, deploys or calls fly.
+    if _help_asked "$@"; then
+        usage "$@"
+        return $?
+    fi
     local _args=() op="" code=0
     for arg in "${@:-}"; do
         [[ -z "$arg" ]] && continue

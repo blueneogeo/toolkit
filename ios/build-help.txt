@@ -1,0 +1,405 @@
+Usage: ./build.sh ios [--device <name|udid>] [--config <name>] [--server] <command> [arguments]
+
+The iOS app. LIVE marks a command that reaches TestFlight, App Store
+Connect, git tags or real testers.
+
+Targets: install, uninstall, watch, screenshot, see, logs, debug and profile
+take an optional target after the command: device, simulator, or a phone's
+or simulator's name or UDID. Without one they use a connected phone, else the
+booted simulator.
+
+Options:
+  --device, -d <name|udid>  Which connected phone "device" means when several
+                            are connected. IOS_DEVICE sets a default.
+  --config, -c <name>       debug (default), profile (optimised, still the
+                            development app and server) or release (the App
+                            Store build; it can't be installed directly).
+                            IOS_CONFIG sets a default.
+  --server                  Runs the command on the build server the owner
+                            starts with ./build.sh builder start, when the
+                            build server allows it.
+  IOS_LAUNCH_ARGS="<args>"  Extra launch arguments for every simulator launch.
+
+-- Build and run
+== setup [--force] [--renew-profiles]
+Sets up a new checkout or Mac.
+Makes build.properties when missing, checks the tools, generates the Xcode
+project, builds for the simulator and writes the editor's settings.
+--renew-profiles renews the App Store provisioning profiles through fastlane
+match, after adding a capability such as Associated Domains.
+Changes: build.properties, the Xcode project and build/; with
+--renew-profiles, the profiles at Apple.
+Run again: safe; does only what is missing.
+Example: ./build.sh ios setup
+
+== build
+Formats, lints and builds the app.
+SwiftFormat, then lint, then an incremental build.
+Changes: Swift files (formatting) and build/.
+Run again: safe.
+Example: ./build.sh ios build
+
+== clean
+Removes the build.
+Runs xcodebuild clean and deletes build/ and the app's DerivedData.
+Changes: deletes those folders; the next build takes longer.
+Run again: safe.
+Example: ./build.sh ios clean
+
+== install [target] [--quiet|-q] [--no-launch]
+Builds, installs and opens the app.
+On a phone or simulator. --quiet doesn't open Device Hub. --no-launch
+installs without opening the app, so the next launch is the first after an
+install. On a simulator it first removes old compiled Core ML models.
+Changes: the app on that phone or simulator; Swift files (formatting).
+Run again: safe.
+Example: ./build.sh ios install simulator
+
+== launch [target] [-- args...]
+Opens the installed app.
+Arguments after -- go to the app.
+Changes: nothing besides starting the app.
+Run again: safe; restarts the app.
+Example: ./build.sh ios launch simulator
+
+== uninstall [target]
+Stops the watcher and the app, and removes the app.
+Changes: deletes the app and its data from that phone or simulator.
+Run again: safe.
+Example: ./build.sh ios uninstall simulator
+
+== watch [target] [swift|build]
+Installs the app and reinstalls it on changes.
+swift (default) rebuilds on every saved .swift file. build waits for
+./build.sh ios build and installs what it built. Runs until Ctrl-C.
+Changes: the app on that phone or simulator.
+Run again: safe.
+Example: ./build.sh ios watch build
+
+== test [filter] [timeout] [--no-build|--build-only]
+Runs the unit tests.
+filter is a test class name; timeout is in seconds (default 120). Needs the
+local server. --no-build skips the build when nothing changed. --build-only
+builds the tests without running them and needs no server.
+Changes: build/ only; the installed app keeps its data.
+Run again: safe.
+Example: ./build.sh ios test FeedStateTests
+
+== tsan-test [filter] [timeout] [--no-build|--build-only]
+Runs the unit tests under the Thread Sanitizer.
+Takes the same arguments as test.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh ios tsan-test FeedStateTests
+
+== simulator create <model> [name]
+Makes a simulator of another iPhone model.
+On the newest iOS (SIM_OS_VERSION picks another), unless one of that name
+exists. Prints its UDID. The name defaults to the model.
+Changes: adds a simulator.
+Run again: safe; an existing one is kept.
+Example: ./build.sh ios simulator create "iPhone 13 mini"
+
+== simulator front <simulator>
+Brings the app back to the front on a simulator.
+As a tap on its icon does: the running app carries on.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios simulator front "iPhone 17 Pro"
+
+== simulator contact <simulator> <file.vcf>
+Adds contacts to a simulator.
+Adds the vCard's contacts and lets the app read them, without the system
+asking.
+Changes: that simulator's Contacts.
+Run again: adds the contacts again.
+Example: ./build.sh ios simulator contact "iPhone 17 Pro" people.vcf
+
+== simulator restart <simulator>
+Shuts a simulator down and starts it again.
+With fresh system services, its sound among them.
+Changes: restarts that simulator.
+Run again: safe.
+Example: ./build.sh ios simulator restart "iPhone 17e"
+
+== simulator text-size [size]
+Shows or sets the simulator's text size.
+Dynamic Type. Without a size it prints the current one. large is the
+default. --device picks the simulator, else the booted one. Sizes:
+extra-small, small, medium, large, extra-large, extra-extra-large,
+extra-extra-extra-large, accessibility-medium, accessibility-large,
+accessibility-extra-large, accessibility-extra-extra-large,
+accessibility-extra-extra-extra-large.
+Changes: the simulator's text size.
+Run again: safe.
+Example: ./build.sh ios simulator text-size accessibility-large
+
+== signin [simulator|<name|udid>] [email code]
+Signs a simulator in without the interface.
+With SCRIPT_ENV_TURN_LOGIN_EMAIL and _CODE from build.properties.local, or
+the given account and its fixed code. Runs the sign_in debug script, no
+rebuild.
+Changes: the app's session on that simulator.
+Run again: safe.
+Example: ./build.sh ios signin simulator
+
+== signout [simulator|<name|udid>]
+Signs a simulator out.
+Runs the sign_out debug script.
+Changes: the app's session on that simulator.
+Run again: safe.
+Example: ./build.sh ios signout simulator
+
+-- See and drive the screen
+== screenshot [target] [name]
+Captures the screen to ios/build/screenshots/.
+From the connected phone or the booted simulator; nothing is built. Prints
+the device and the file's path. A lone argument is the name, unless exactly
+one connected phone matches it.
+Changes: adds a file in ios/build/screenshots/.
+Run again: safe.
+Example: ./build.sh ios screenshot simulator feed
+
+== screenshots collect [simulator]
+Copies the debug scripts' screenshots out of the simulator.
+The ones DebugScreenshot.save made, into ios/build/screenshots/. A
+simulator's name or UDID picks which one.
+Changes: adds files in ios/build/screenshots/.
+Run again: safe.
+Example: ./build.sh ios screenshots collect
+
+== see [target] [--focus "<question>"]
+Captures the screen and has a vision model describe it.
+For models that can't read pictures. --focus asks one question.
+Changes: adds a screenshot.
+Run again: safe.
+Example: ./build.sh ios see simulator --focus "Is the record button visible?"
+
+== record [simulator|<name|udid>] [name] [--seconds N] [--script <names>] [--frames <fps>]
+Records the simulator's screen to a video.
+Into ios/build/recordings/<name>.mp4 (simulator only). --seconds sets the
+length (default 10). --script films debug scripts from launch. --frames cuts
+frames and contact sheets at that rate.
+Changes: adds files in ios/build/recordings/.
+Run again: safe.
+Example: ./build.sh ios record simulator lens_switch --seconds 6 --frames 10
+
+== ui tap <x> <y> | --id <id> | --label <text>
+Taps the simulator's screen.
+At device points, or on the element with that accessibility id or label.
+Needs baguette. Every ui action saves a screenshot unless --no-shot;
+--delay <ms> waits longer before it (default 700).
+Changes: whatever the tap does in the app.
+Run again: taps again.
+Example: ./build.sh ios ui tap --id record-primary-button
+
+== ui swipe <x1> <y1> <x2> <y2> | up|down|left|right
+Swipes on the simulator's screen.
+Between two points, or across the whole screen.
+Changes: whatever the swipe does in the app.
+Run again: swipes again.
+Example: ./build.sh ios ui swipe up
+
+== ui type <text>
+Types into the focused field on the simulator.
+Changes: the field's text.
+Run again: types again.
+Example: ./build.sh ios ui type "Family calls"
+
+== ui press home|lock
+Presses a hardware button on the simulator.
+Changes: what the button does.
+Run again: presses again.
+Example: ./build.sh ios ui press home
+
+== ui describe [name]
+Prints the simulator's accessibility tree.
+Role, label, id and frame of each element; also saved to
+ios/build/screenshots/<name>-ui.txt.
+Changes: adds that file.
+Run again: safe.
+Example: ./build.sh ios ui describe feed
+
+== push <payload.json>
+Delivers a push to the app on the booted simulator.
+The simulator shows it directly, without the notification service.
+Changes: a notification on the simulator.
+Run again: delivers it again.
+Example: ./build.sh ios push ios/debug/push.json
+
+-- Logs and measuring
+== logs [target] [--cat <cat>] [--level <level>] [--process <name|all>] [--minutes M] [N|tail]
+Shows the app's log lines.
+The last N lines (default 10) of the past M minutes (default 15), or tail to
+follow them. --process reads another process, such as ANECompilerService.
+The phone's logs come over USB through pymobiledevice3.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios logs simulator --cat network 50
+
+== debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build]
+Builds, opens the app and follows its log.
+Stops when the app goes to the background. --script runs debug scripts at
+launch. --no-build reopens the installed simulator app. Without a target it
+uses a connected phone; pass simulator for the simulator.
+Changes: the app on that phone or simulator.
+Run again: safe.
+Example: ./build.sh ios debug simulator --cat feed
+
+== profile [target] [--script <names>] [--seconds N] [--render] [--template <name>] [--name <label>] [--main] [--until <s>]
+Records an Instruments trace and sums it up.
+Prints frame lines and the heaviest functions; --render adds GPU and render
+time, --main the main thread per quarter second, --until only the first
+seconds. Traces go to ios/build/traces/.
+Changes: adds a trace file; reopens the app.
+Run again: safe.
+Example: ./build.sh ios profile simulator --script deck_tour --seconds 20
+
+-- Code checks
+== lint
+Checks the code: SwiftLint, SwiftFormat and the toolkit's gates.
+On the app, its tests and debug scripts, then ios/lint.sh.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios lint
+
+== format
+Formats the Swift code with SwiftFormat.
+The app, its tests and debug scripts.
+Changes: Swift files.
+Run again: safe.
+Example: ./build.sh ios format
+
+== unused
+Finds unused code with Periphery.
+Builds for the simulator first.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh ios unused
+
+== analyze
+Runs Xcode's static analyzer.
+Memory, logic and dead stores.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh ios analyze
+
+== audit
+Runs every check: lint, the format check, unused and analyze.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh ios audit
+
+== doctor
+Checks the tools the iOS build needs.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios doctor
+
+-- Services
+== sentry events [N]
+Shows the app's last Sentry events.
+The last N (default 10).
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios sentry events 20
+
+== sentry issues [status] [N]
+Lists the app's Sentry issues.
+Up to N (default 100), with counts. status is unresolved (default), resolved
+or muted.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios sentry issues
+
+== sentry event <id>
+Shows one Sentry event in full.
+With its breadcrumbs.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios sentry event 4f1c2a
+
+== sentry issue <short-id> [all]
+Shows one Sentry issue.
+Its tags, days and latest event; all adds iOS's own stack frames, as for a
+hang inside the system.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios sentry issue TURN-IOS-3F
+
+== sentry resolve <short-id>...
+Marks the app's Sentry issues resolved.
+Changes: the issues' status in Sentry.
+Run again: safe.
+Example: ./build.sh ios sentry resolve TURN-IOS-3F
+
+== sentry setup [platform]
+Makes the app's Sentry project when it is missing.
+Prints its DSN.
+Changes: may add a project in Sentry.
+Run again: safe.
+Example: ./build.sh ios sentry setup apple-ios
+
+== portal [prefix...]
+Lists the app's bundle ids at Apple.
+Their capabilities and provisioning profiles, from the App Store Connect API.
+The prefix defaults to the app's bundle id.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh ios portal
+
+== configure
+Turns on outside services in build.properties.
+Asks about Sentry, the server, the e2e tests and uploads, and skips what is
+set up already.
+Changes: build.properties.
+Run again: safe.
+Example: ./build.sh ios configure
+
+== update-toolkit
+Moves the toolkit submodule to its newest commit.
+Stages the new submodule commit in the project; commit it when ready.
+Changes: the toolkit folder and the git index.
+Run again: safe.
+Example: ./build.sh ios update-toolkit
+
+== e2e
+Builds and runs the UI tests against the configured server.
+Needs TOOLKIT_E2E_ENABLED. Starts the server when SERVER_START_CMD is set.
+Changes: the app on the simulator, and test data on that server.
+Run again: safe.
+Example: ./build.sh ios e2e
+
+== e2e-run
+Runs the built UI tests again without building.
+Changes: test data on the configured server.
+Run again: safe.
+Example: ./build.sh ios e2e-run
+
+-- Release
+== preflight
+Builds the upload's Release build and checks it, without uploading.
+Unsigned, for a generic iOS device, then the encryption check.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh ios preflight
+
+== upload [--force] "<changelog>" LIVE
+Builds, signs and uploads the app to TestFlight.
+Checks doctor, a clean tree and the branch, then asks. Pushes a git tag
+ios/vN, builds Release, archives, signs and uploads through fastlane, and
+hands the build to the groups in TESTFLIGHT_GROUPS (empty: internal testers
+only). Apple then processes it for 10 to 30 minutes.
+  --force       Skips the question.
+Changes: a pushed git tag, a new TestFlight build, and testers get it.
+The owner runs it.
+Run again: safe; a commit that has a tag already is not uploaded again.
+Example: TESTFLIGHT_GROUPS= ./build.sh ios upload "Phone sign-in"
+
+== testflight <build> ["<changelog>"] LIVE
+Hands an uploaded build to the TestFlight groups.
+The groups in TESTFLIGHT_GROUPS. The changelog defaults to the one on the
+build's git tag.
+Changes: testers in those groups get the build.
+Run again: safe.
+Example: ./build.sh ios testflight 212

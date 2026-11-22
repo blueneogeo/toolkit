@@ -1,0 +1,364 @@
+Usage: ./build.sh server [--server] <command> [arguments]
+
+The Go server: the local one on this Mac, its database, and the live app on
+Fly (FLY_APP in build.properties). LIVE marks a command that changes the live
+app, its database, git tags or real people.
+
+--server runs a command on the build server that the owner starts with
+./build.sh builder start (automatic in a sandbox). Only the commands the build
+server allows go there; the rest run here.
+
+-- Local server
+== build
+Compiles the server.
+Runs sqlc and the lint check first, then builds the binary into bin/.
+Changes: bin/ and the generated sqlc code.
+Run again: safe.
+Example: ./build.sh server build
+
+== clean
+Removes the build and the local server's state.
+Deletes bin/ and .watch/ (the log and the running server's id). Stop the
+server first.
+Changes: deletes those two folders.
+Run again: safe.
+Example: ./build.sh server clean
+
+== start
+Builds and starts the local server.
+Runs in the background on this Mac and needs the local database. The log
+goes to .watch/server.log. Refuses when the server is running already.
+Changes: starts a process; the server applies new database migrations.
+Run again: refuses while one is running. Stop it first.
+Example: ./build.sh server start
+
+== stop
+Stops the local server.
+Stops the server that start or watch started.
+Changes: stops the process and removes .watch/.
+Run again: safe; says so when nothing runs.
+Example: ./build.sh server stop
+
+== status
+Shows the local server's health.
+Its address, health, process and first metrics.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server status
+
+== logs [N|tail]
+Shows the local server's log.
+The last N lines (default 10), formatted. tail follows new lines until Ctrl-C.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server logs 50
+
+== debug
+Follows the local server's log.
+Prints each line as it is written, for ./build.sh debug. Ctrl-C stops it.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server debug
+
+== watch
+Runs the local server and restarts it on changes.
+Rebuilds and restarts the server on every saved .go file. Runs until Ctrl-C,
+then stops the server.
+Changes: starts a process; rebuilds bin/.
+Run again: refuses while a server runs.
+Example: ./build.sh server watch
+
+-- Tests and code
+== test [timeout]
+Runs all Go tests.
+Runs sqlc and the lint check first. Uses a database of its own and needs no
+running server. A number sets the timeout in seconds (default 120).
+Changes: nothing outside the build caches.
+Run again: safe.
+Example: ./build.sh server test
+
+== test run <pattern> [package]
+Runs the Go tests whose names match a pattern.
+The pattern is Go's -run pattern. package is one package, such as
+./internal/integration; by default all of them. Fails when no test matches.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server test run TestInvite ./internal/integration
+
+== test local
+Checks the local server's self-test.
+Asks the running local server for its self-test results.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server test local
+
+== test live
+Checks the live server's self-test.
+Asks the live server for its self-test results. Reads only.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server test live
+
+== test e2e [local|live] [test]
+Runs the end-to-end test against a running server.
+Signs people up with the codes that arrive by email, invites, sends and
+answers Turns, and opens every link in every email. local (default) or live
+picks the server. A test name, such as TestUploadInParts$, runs only that
+one. Needs RESEND_API_KEY and E2E_INBOX_DOMAIN. Waits up to 10 minutes.
+Keeps each email in build/e2e-mail/<local|live>/<run>/.
+Changes: makes test accounts on that server and deletes them at the end;
+about 30 real emails go to the test inbox. With live, on the live server.
+Run again: safe; each run uses new people.
+Example: ./build.sh server test e2e local TestUploadInParts$
+
+== test e2e headers <run>
+Shows the full headers of one e2e run's emails.
+Reads them from the inbox and checks each DKIM signature. <run> is the run
+folder's name.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server test e2e headers 1019-105649
+
+== lint
+Checks the Go code with golangci-lint.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server lint
+
+== format
+Formats the Go code.
+Rewrites the Go sources with golangci-lint --fix.
+Changes: Go files in the server folder.
+Run again: safe.
+Example: ./build.sh server format
+
+== doctor
+Checks what the server needs on this Mac.
+The tools, the settings and the local database.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server doctor
+
+== docs
+Writes the API's OpenAPI description.
+Made from the handlers' annotations, into docs/.
+Changes: docs/.
+Run again: safe.
+Example: ./build.sh server docs
+
+== sqlc
+Writes the Go code for the SQL queries.
+From db/queries/, with sqlc.
+Changes: the generated query code.
+Run again: safe.
+Example: ./build.sh server sqlc
+
+== deps <module[@version]>...
+Adds Go modules to go.mod.
+Runs go get without tidy. Refuses, and puts go.mod back, when a module would
+raise the project's Go version: pick an older version then.
+Changes: go.mod and go.sum.
+Run again: safe.
+Example: ./build.sh server deps github.com/google/uuid@v1.6.0
+
+== deps tidy
+Tidies go.mod.
+Runs go mod tidy, once the code imports a module added with deps.
+Changes: go.mod and go.sum.
+Run again: safe.
+Example: ./build.sh server deps tidy
+
+-- Local database
+== migrate up
+Applies new migrations to the local database.
+The server also does this when it starts.
+Changes: the local database's tables.
+Run again: safe; applies nothing the second time.
+Example: ./build.sh server migrate up
+
+== migrate down [N|all]
+Undoes migrations on the local database.
+The last one, the last N, or all.
+Changes: the local database; undoing a migration can drop tables and data.
+Run again: undoes one more each time.
+Example: ./build.sh server migrate down 1
+
+== sql '<sql>'
+Runs SQL on the local database.
+Through psql.
+Changes: whatever the SQL changes, on the local database only.
+Run again: depends on the SQL.
+Example: ./build.sh server sql 'SELECT count(*) FROM users'
+
+-- Setting up this Mac
+== setup
+Sets up local development.
+Checks the tools, the database and the keys in .env.local and the keychain,
+and asks for what is missing.
+Changes: .env.local, the keychain and the local database.
+Run again: safe; skips what is there.
+Example: ./build.sh server setup
+
+== apns-setup
+Stores the Apple push key for the local server.
+Asks for the APNs key file and its details.
+Changes: the keychain and .env.local.
+Run again: replaces the stored key.
+Example: ./build.sh server apns-setup
+
+== email-setup
+Stores the Resend key for the local server.
+Asks for the Resend API key the local server sends email with.
+Changes: the keychain and .env.local.
+Run again: replaces the stored key.
+Example: ./build.sh server email-setup
+
+-- Live server (Fly)
+== live status
+Shows the live app's health.
+Its address, health, machines and metrics.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live status
+
+== live logs [N]
+Shows the live app's log.
+The last N lines of the log on Fly (default 10).
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live logs 100
+
+== live logs tail [N]
+Follows the live app's log.
+The last N lines (default 10), then new lines until Ctrl-C.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live logs tail
+
+== live deploy [--dry-run] [--strategy rolling|immediate] [--force] "<changelog>" LIVE
+Deploys the current commit to the live app.
+In order: checks (doctor, a clean tree, the branch is pushed), checks the
+started machines' health, pushes a git tag deploy/vN, backs up the database,
+stages changed secrets from .env.local, runs fly deploy, notes the release on
+the tag, checks health and the self-test, then runs test e2e live. Never
+rolls back.
+  --dry-run     Every check, and nothing deployed, tagged or staged.
+  --strategy    rolling (default) or immediate. Needed when a started
+                machine is failing; the deploy never picks one itself.
+  --force       Skips the question before the deploy.
+Changes: the live server, its secrets, a pushed git tag and a database
+backup. The owner runs it; agents only with --dry-run.
+Run again: safe; a commit that is deployed already is skipped.
+Example: ./build.sh server live deploy --dry-run "Phone sign-in"
+
+== live rollback [--dry-run] [--force] LIVE
+Puts the live app back on an earlier release.
+Restores the database from a backup into a new database cluster and deploys
+the old image. Asks first.
+  --dry-run     Checks everything and changes nothing.
+Changes: the live server and its database. The owner runs it; agents only
+with --dry-run.
+Run again: each run is a new rollback.
+Example: ./build.sh server live rollback --dry-run
+
+== live snapshots
+Lists the live database's backups.
+Newest first.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live snapshots
+
+== live sql [--write [--force]] '<sql>' LIVE
+Runs SQL on the live database.
+Through a temporary proxy, as one transaction that stops at the first error.
+Read-only unless --write. Use ./build.sh admin api first when it can answer.
+  --write       Allows changes, after the owner's Touch ID and a database
+                backup. Agents never use it.
+Changes: nothing without --write; with --write, live data.
+Run again: read-only runs are safe.
+Example: ./build.sh server live sql 'SELECT count(*) FROM users'
+
+== live clusters [org]
+Lists the Fly Postgres clusters.
+Active and deleted, with the one in use marked. org is a Fly organisation;
+by default the cluster's own.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live clusters
+
+== live deployments
+Lists the deploy and rollback tags.
+Fetches the tags from origin first and marks the one at the current commit.
+Changes: nothing besides the fetched tags.
+Run again: safe.
+Example: ./build.sh server live deployments
+
+== live releases
+Shows Fly's release history of the live app.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live releases
+
+== live machines
+Lists the live app's machines and their state.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live machines
+
+== live setup
+Runs the local setup, the same as setup.
+Nothing live.
+Changes: .env.local, the keychain and the local database.
+Run again: safe.
+Example: ./build.sh server live setup
+
+== live ci-setup LIVE
+Sets up deploys from GitHub Actions.
+Revokes every Fly deploy token of the live app, makes a new one and stores it
+with FLY_APP and FLY_DB_CLUSTER in the GitHub repository's secrets and
+variables. Asks first.
+Changes: Fly deploy tokens (running CI jobs fail) and GitHub secrets.
+Run again: replaces the token again.
+Example: ./build.sh server live ci-setup
+
+== live sentry events [N]
+Shows the server's last Sentry events.
+The last N (default 10).
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live sentry events 20
+
+== live sentry issues [status] [N]
+Lists the server's Sentry issues.
+Up to N (default 100), with counts. status is unresolved (default), resolved
+or muted.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live sentry issues
+
+== live sentry event <id>
+Shows one Sentry event in full.
+With its breadcrumbs.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live sentry event 4f1c2a
+
+== live sentry issue <short-id> [all]
+Shows one Sentry issue.
+Its tags, days and latest event; all adds the system's own stack frames.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh server live sentry issue TURN-SERVER-12
+
+== live sentry resolve <short-id>...
+Marks the server's Sentry issues resolved.
+Changes: the issues' status in Sentry.
+Run again: safe.
+Example: ./build.sh server live sentry resolve TURN-SERVER-12
+
+== live sentry setup [platform]
+Makes the server's Sentry project when it is missing.
+Prints its DSN.
+Changes: may add a project in Sentry.
+Run again: safe; an existing project is left as it is.
+Example: ./build.sh server live sentry setup go

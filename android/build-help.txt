@@ -1,0 +1,330 @@
+Usage: ./build.sh android [--device <serial>] [--config <name>] <command> [arguments]
+
+The Android app. LIVE marks a command that reaches Google Play, git tags or
+real testers. Each command's help ends with its details from
+toolkit/android/config/README.md or its own usage text.
+
+Targets: install, launch, uninstall, debug, logs, record, screenshot, see and
+ui take an optional target after the command: emulator (simulator means the
+same), device, or a serial or AVD name. Without one they use the running
+emulator, else the one connected phone.
+
+Options:
+  --device, -d <serial>  Which device a command uses when several are
+                         connected. ANDROID_DEVICE sets a default.
+  --config, -c <name>    debug (default), profile (optimised, still the
+                         development app and server) or release.
+                         ANDROID_CONFIG sets a default.
+  ANDROID_LAUNCH_ARGS="<extras>"
+                         am start extras added to every launch, such as
+                         "--ez turnMuted true".
+
+Coordinates are dp, the same numbers as iOS points on a 402x874 screen.
+
+-- Build and run
+== setup [--force]
+Sets up a new checkout or Mac.
+SDK packages and licences, the AVD, local.properties, the Gradle wrapper,
+then a build. --force builds from clean.
+Changes: the Android SDK, the AVDs, local.properties and build/.
+Run again: safe; does only what is missing.
+Example: ./build.sh android setup
+
+== build
+Formats, lints and builds the app.
+ktlint, detekt and the parity gate, then the configured build type.
+Changes: Kotlin files (formatting) and build/.
+Run again: safe.
+Example: ./build.sh android build
+
+== bundle
+Builds the App Bundle (.aab) and prints its size.
+Of the configured build type.
+Changes: build/.
+Run again: safe.
+Example: ./build.sh android --config release bundle
+
+== clean
+Removes the build.
+Gradle clean, and build/ with its screenshots and recordings.
+Changes: deletes those files.
+Run again: safe.
+Example: ./build.sh android clean
+
+== install [target] [--quiet|-q] [--no-launch] [--fixture [slot]]
+Builds, installs and opens the app.
+--no-launch installs without opening it. --fixture seeds the launch with a
+fresh session of the fixture slot.
+Changes: the app on the emulator or phone.
+Run again: safe.
+Example: ./build.sh android install emulator
+
+== launch [target] [--fixture [slot]] [-- extras...]
+Opens the installed app.
+Extras after -- go to am start. Builds first when no APK exists.
+Changes: nothing besides starting the app.
+Run again: safe; restarts the app.
+Example: ./build.sh android launch -- --ez turnMuted true
+
+== uninstall [target]
+Stops the watcher and the app, and removes the app.
+The emulator keeps running.
+Changes: deletes the app and its data from the device.
+Run again: safe.
+Example: ./build.sh android uninstall emulator
+
+== watch [target] [kotlin|build]
+Installs the app and reinstalls it on changes.
+kotlin (default) rebuilds on every saved Kotlin file; build installs what
+./build.sh android build made. Runs until Ctrl-C.
+Changes: the app on the device.
+Run again: safe.
+Example: ./build.sh android watch
+
+== test [filter] [timeout] [--no-build|--build-only]
+Runs the unit tests.
+filter is a class name (or Class/method), several separated by commas.
+--build-only builds the tests without running them and needs no server.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh android test FeedStateTest
+
+== test instrumented [filter] [timeout] [--build-only] [--keep-installed]
+Runs the tests under src/androidTest on the emulator or a phone.
+--keep-installed leaves the app and its data for a second run.
+Changes: installs the test app on the device.
+Run again: safe.
+Example: ./build.sh android test instrumented
+
+== signin [emulator|device|<serial|avd name>] [email code]
+Signs the emulator in without the interface.
+With SCRIPT_ENV_TURN_LOGIN_EMAIL and _CODE, or the given account and its
+fixed code. Runs the sign_in debug script.
+Changes: the app's session on the device.
+Run again: safe.
+Example: ./build.sh android signin emulator
+
+== signout [emulator|device|<serial|avd name>]
+Signs the emulator out.
+Runs the sign_out debug script.
+Changes: the app's session on the device.
+Run again: safe.
+Example: ./build.sh android signout
+
+-- Emulator and screen
+== emulator <start|stop|status|restart|create|front|contact|text-size|push>
+Starts, stops and sets up emulators.
+start boots an AVD, stop shuts it down, status lists what is connected,
+create makes an AVD, front brings the app forward, contact adds contacts,
+text-size sets the font scale, push hands the app a push.
+Changes: the emulator's state; status changes nothing.
+Run again: safe.
+Example: ./build.sh android emulator status
+
+== push <payload.json>
+Hands a push payload to the app on the emulator.
+Through the app's debug push receiver; no FCM.
+Changes: a notification on the emulator.
+Run again: delivers it again.
+Example: ./build.sh android push android/debug/push.json
+
+== screenshot [target] [name]
+Captures the screen to build/screenshots/.
+Prints the device and the file's path last.
+Changes: adds a file.
+Run again: safe.
+Example: ./build.sh android screenshot emulator feed
+
+== screenshots collect [target]
+Copies the debug scripts' screenshots into build/screenshots/.
+Changes: adds files.
+Run again: safe.
+Example: ./build.sh android screenshots collect
+
+== see [target] [--focus "<question>"]
+Captures the screen and has a vision model describe it.
+For models that can't read pictures.
+Changes: adds a screenshot.
+Run again: safe.
+Example: ./build.sh android see --focus "Is the record button visible?"
+
+== record [target] [name] [--seconds N] [--script <names>] [--frames <fps>] [--fixture [slot]]
+Records the screen to build/recordings/<name>.mp4.
+At most 180 seconds. --script films debug scripts from launch, --frames cuts
+frames and contact sheets.
+Changes: adds files in build/recordings/.
+Run again: safe.
+Example: ./build.sh android record lens_switch --seconds 6 --frames 10
+
+== ui <tap|swipe|type|press|describe> [arguments]
+Drives the screen and reads its view tree.
+Taps, swipes, types, presses buttons, or prints the view tree.
+Changes: whatever the action does in the app; describe changes nothing.
+Run again: repeats the action.
+Example: ./build.sh android ui tap --id record-primary-button
+
+== compare <scripts> [target] [--fixture [slot]] [--no-build] [--ios <dir>] [--android <dir>]
+Puts the iOS and Android frames of debug scripts side by side.
+Runs the scripts here, collects their frames and writes
+build/compare/<run>/index.html.
+Changes: the app on the device and files in build/compare/.
+Run again: safe.
+Example: ./build.sh android compare lens_check --fixture
+
+-- Logs and measuring
+== logs [target] [--cat <cat>] [--level <level>] [--process <name|all>] [--minutes M] [N|tail]
+Shows the app's log lines.
+The last N lines (default 10) of the past M minutes (default 15), or tail to
+follow them.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh android logs --cat network 50
+
+== debug [target] [--cat <cat>] [--level <level>] [--script <names>] [--no-build] [--timeout N] [--fixture [slot]]
+Builds, opens the app and follows its log.
+Stops when the app goes to the background or a script run ends. A script run
+exits 1 when a check failed.
+Changes: the app on the device.
+Run again: safe.
+Example: ./build.sh android debug --script lens_check --fixture
+
+== profile [target] [--script <names>] [--seconds N] [--render] [--name <label>] [--gfxinfo] [--main] [--until <s>] [--callers <fn>] [--trace <file>] [--fixture [slot]]
+Records a Perfetto trace and sums it up.
+Frame lines, CPU per thread and the heaviest functions.
+Changes: adds a trace file; reopens the app.
+Run again: safe.
+Example: ./build.sh android profile --script deck_swipe_perf
+
+== benchmark [target] [Class[#method]] [--build-only] [--fixture [slot]]
+Runs the Macrobenchmarks against the profile build.
+Changes: installs the profile build and the benchmark app on the device.
+Run again: safe.
+Example: ./build.sh android benchmark StartupBenchmark
+
+== transcription-bench [target] [push|run|report|clean] [options]
+Measures the app's transcription on a corpus of clips.
+Changes: copies clips into the app's files (clean removes them) and writes
+results in build/transcription-bench/.
+Run again: safe.
+Example: ./build.sh android transcription-bench report
+
+-- Code checks
+== lint
+Checks the code.
+ktlint, detekt, the grep gates, the parity gate and Android Lint.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh android lint
+
+== format
+Formats the Kotlin code with ktlint.
+Changes: Kotlin files.
+Run again: safe.
+Example: ./build.sh android format
+
+== unused
+Lists what R8 removes from the profile build.
+The app's own code only.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh android unused
+
+== analyze
+Runs Android Lint with compose-lints, every warning an error.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh android analyze
+
+== audit
+Runs the lint overrides check, then lint, unused and analyze.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh android audit
+
+== doctor [--quick] [--json] [--watch [minutes]]
+Checks the Mac, the SDK, the emulator and the server.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh android doctor --quick
+
+-- Parity with iOS
+== sync <status|diff|plan|behind|mark|map|init|coverage|guide>
+Compares Android with iOS and keeps the port's ledger.
+status and diff show what changed on iOS since a unit was ported; mark
+records units as ported.
+Changes: status, diff, behind and map change nothing; mark and init write the
+ledger under sync/; plan writes build/sync/.
+Run again: safe.
+Example: ./build.sh android sync status
+
+== icons [generate|check|scan|sheet]
+Makes the Material Symbols the app uses for iOS's SF Symbols.
+Changes: generate writes res/drawable/ic_*.xml and TurnIcons.kt; check, scan
+and sheet change nothing in the app.
+Run again: safe.
+Example: ./build.sh android icons check
+
+-- Overnight work
+== lock <gradle|emulator> -- <command...>
+Runs a command while holding a shared lock.
+Every checkout and worktree on this Mac shares the locks.
+Changes: whatever the command changes.
+Run again: safe.
+Example: ./build.sh android lock emulator -- ./build.sh android debug --script lens_check
+
+== lock status
+Shows who holds each lock.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh android lock status
+
+== blocker add --kind <kind> --summary "<text>" [options]
+Logs a blocker in the night's blockers.jsonl.
+Changes: appends a line to that file.
+Run again: adds another line.
+Example: ./build.sh android blocker add --kind emulator --summary "Emulator did not boot"
+
+== worktree new <package> | remove <package> [--force] | list
+Makes and removes package worktrees with toolkit/ filled in.
+Changes: new adds a worktree and a branch pkg/<package>; remove deletes them;
+list changes nothing.
+Run again: new refuses an existing package.
+Example: ./build.sh android worktree list
+
+== night init <date>
+Makes the night's folder and queue.json.
+Changes: adds files in the overnight folder; keeps an existing queue.json
+unless --force.
+Run again: safe.
+Example: ./build.sh android night init 2026-11-22
+
+-- Release
+== preflight
+Builds the release bundle unsigned and checks it, without uploading.
+Changes: build/ only.
+Run again: safe.
+Example: ./build.sh android preflight
+
+== upload [--dry-run] [--force] "<release notes>" LIVE
+Tags, builds, signs and uploads the app to Google Play.
+Uploads to the internal track, then promotes to ANDROID_PLAY_TRACKS. Asks
+first unless --force. --dry-run stops before the tag and Play.
+Changes: a pushed git tag android/vN and a new release on Play. The owner
+runs it; agents only with --dry-run.
+Run again: safe; a commit that has an upload tag already is not uploaded again.
+Example: ./build.sh android upload --dry-run "Phone sign-in"
+
+== promote <track> [--from <track>] ["<release notes>"] LIVE
+Hands the newest internal release to another Play track.
+Or the newest release on --from.
+Changes: who gets the release on Google Play.
+Run again: safe.
+Example: ./build.sh android promote beta
+
+== sentry <events|issues|event|issue|resolve|setup> [arguments]
+Sentry queries for the Android app.
+The same commands as ./build.sh ios sentry. resolve marks issues resolved
+and setup may add a project; the rest only read.
+Changes: nothing, except resolve and setup.
+Run again: safe.
+Example: ./build.sh android sentry issues

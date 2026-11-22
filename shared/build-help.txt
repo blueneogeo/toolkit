@@ -1,0 +1,42 @@
+-- Logs, pictures and the build server
+== debug [ios target] [--cat <cat>] [--level <level>] [--script <names>]
+Follows the iOS app's log and the local server's log together.
+Interleaved in one stream; stops when the app goes to the background. Needs
+the local server running. --cat filters by category (network, playback,
+feed, auth, recording, transcription, settings, push, lifecycle, contacts,
+invite), --level by severity (debug, info, warning, error). --script runs
+debug scripts at launch.
+Changes: builds and opens the app, as ./build.sh ios debug does.
+Run again: safe.
+Example: ./build.sh debug --cat network --level info
+
+== vision <image> --focus "<question>" [--model <id>] [--max-dim N] [--retries N]
+Asks a vision model one question about a picture and prints the answer.
+For models that can't read pictures; others read the PNG directly. --focus
+is required. Needs TOOLKIT_MODEL_API_KEY; TOOLKIT_MODEL_BASE_URL and
+TOOLKIT_VISION_MODEL pick the service and the model. --max-dim caps the
+longest edge (default: full size). --retries retries failed calls (default 3).
+Changes: nothing; the picture is sent to that service.
+Run again: safe.
+Example: ./build.sh vision ios/build/screenshots/feed.png --focus "Is the header cut off?"
+
+== builder start
+Starts the build server for sandboxed agents.
+A relay on 127.0.0.1 that runs the commands a sandbox can't, with your
+rights. The owner starts it in their own terminal.
+Changes: starts a background process; writes .watch/builder.port.
+Run again: safe; says so when it runs already.
+Example: ./build.sh builder start
+
+== builder stop
+Stops the build server.
+Changes: stops the process.
+Run again: safe.
+Example: ./build.sh builder stop
+
+== builder status
+Shows whether the build server runs, its port and uptime.
+The default when builder has no command.
+Changes: nothing.
+Run again: safe.
+Example: ./build.sh builder status

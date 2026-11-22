@@ -32,7 +32,11 @@ per-project via the platform's `./build.sh configure`.
 
 - `ios/config/README.md`: full iOS toolkit reference
 - `server/config/README.md`: full server toolkit reference
-- `android/config/README.md`: Android toolkit reference. `./build.sh android <command> --help` prints one command's entry from it, or the command's own usage text where it has one; `android/tests/help_test.sh` checks the two name the same flags.
+- `android/config/README.md`: Android toolkit reference. `./build.sh android <command> --help` prints the command's section of `android/build-help.txt`, then its entry from this README or its own usage text; `android/tests/help_test.sh` checks the two name the same flags.
+
+## Help
+
+Every command takes `--help`, `-h` or `help` and then prints its help and runs nothing: each dispatcher checks with `_help_asked` (`shared/build-utils.sh`) before any other work. `<platform>/build-help.txt` holds the text of each platform's commands, with what each changes, whether it is safe to run again and an example; `LIVE` marks a command that changes something live. A project adds its own commands in `build-help.txt` beside its `build.sh`. The format is described in `shared/build-utils.sh`.
 
 ## Build server
 

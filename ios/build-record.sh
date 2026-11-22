@@ -21,27 +21,7 @@
 RECORD_DEFAULT_SECONDS=10
 
 _record_usage() {
-    cat <<'EOF'
-Usage: ./build.sh ios record [simulator|<name|udid>] [name] [--seconds N]
-                             [--script <names>] [--frames <fps>]
-
-  Record the booted simulator's screen to ios/build/recordings/<name>.mp4
-  (simulator only). The path of the video is printed last.
-
-    [name]             File name without extension (default: rec_<timestamp>)
-    --seconds N        Length of the recording (default: 10). Ctrl-C stops early
-                       and keeps what was recorded.
-    --script <names>   Relaunch the app running these debug scripts (comma-
-                       separated) as the recording starts, without waiting for
-                       the start-up marker. Needs a build with debug scripts.
-    --frames <fps>     Also cut the video into frames at this rate, into
-                       ios/build/recordings/<name>/frame_NNN.png, plus contact
-                       sheets of 48 frames each (sheet_NN.png) to read at once.
-
-Examples:
-    ./build.sh ios record simulator lens_switch --seconds 6 --frames 10
-    ./build.sh ios record deck_open --script deck_tour --seconds 20 --frames 5
-EOF
+    usage record
 }
 
 do_record() {
