@@ -49,6 +49,15 @@ Go module path from `go.mod`, `cmd/server` entry point. Overridable via
 |---|---|---|
 | `TOOLKIT_SERVER_SENTRY_ENABLED` | `false` | `sentry` queries (needs `SENTRY_ORG` and `SERVER_SENTRY_PROJECT`) |
 
+### Deploy
+
+`live deploy` stages each `@sensitive` secret of `.env.schema` that has a value in
+`.env.local` and is new, changed or missing on Fly. `FLY_SET_ONCE_SECRETS` names
+secrets it never stages once Fly has them, such as a key that must never change
+(space-separated, e.g. `FLY_SET_ONCE_SECRETS="PHONE_NUMBER_KEY"`). The cluster
+health step counts only started machines: a machine Fly stopped for being idle
+doesn't make the deploy restart every machine at once.
+
 ### Build pipeline
 
 `_sync_locale` (configurable locale copy) → `sqlc generate` → `golangci-lint` → `go build` → firewall registration.

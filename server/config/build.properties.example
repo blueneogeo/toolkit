@@ -24,4 +24,5 @@
 # ── Fly.io ────────────────────────────────────────────────────────────
 # FLY_APP=
 # FLY_DB_CLUSTER=
+# FLY_SET_ONCE_SECRETS=          # space-separated secrets the deploy never stages once Fly has them
 # GITHUB_REPO=

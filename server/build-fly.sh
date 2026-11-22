@@ -362,21 +362,38 @@ _fly_auth_check() {
     return 0
 }
 
+# Judges the cluster on its started machines. A stopped machine (Fly's
+# auto_stop_machines) keeps a stale check and isn't counted against health;
+# with no machine started there is nothing to judge, and the deploy stays
+# rolling. Returns 0 healthy, 1 a started machine failing, 2 unknown.
 _cluster_healthy() {
-    local checks
-    checks=$(fly machines list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[].checks[0].status // "unknown"' 2>/dev/null)
-    local critical=0 warning=0 passing=0 total=0
-    while read -r status; do
-        [[ -z "$status" ]] && continue
-        total=$((total + 1))
+    local states
+    states=$(fly machines list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[] | "\(.state // "unknown")|\([.checks[]?.status] | if length == 0 then "unknown" elif any(. == "critical") then "critical" elif any(. == "warning") then "warning" elif all(. == "passing") then "passing" else "unknown" end)"' 2>/dev/null)
+    local critical=0 warning=0 passing=0 started=0 stopped=0 other=0 state status
+    while IFS='|' read -r state status; do
+        [[ -z "$state" ]] && continue
+        case "$state" in
+            started) started=$((started + 1)) ;;
+            stopped) stopped=$((stopped + 1)); continue ;;
+            *) other=$((other + 1)); continue ;;
+        esac
         case "$status" in
             passing) passing=$((passing + 1)) ;;
             warning) warning=$((warning + 1)) ;;
             critical) critical=$((critical + 1)) ;;
         esac
-    done <<< "$checks"
-    echo "  $passing passing, $warning warning, $critical critical ($total machines)"
-    if [[ $passing -eq $total ]]; then
+    done <<< "$states"
+    local idle="$stopped stopped"
+    [[ $other -gt 0 ]] && idle+=", $other in another state"
+    if [[ $((started + stopped + other)) -eq 0 ]]; then
+        echo "  no machines listed: nothing to judge, the deploy stays rolling"
+        return 0
+    elif [[ $started -eq 0 ]]; then
+        echo "  no machine started ($idle, not counted): nothing to judge, the deploy stays rolling"
+        return 0
+    fi
+    echo "  $started started: $passing passing, $warning warning, $critical critical; $idle, not counted"
+    if [[ $passing -eq $started ]]; then
         return 0
     elif [[ $warning -gt 0 || $critical -gt 0 ]]; then
         return 1
@@ -389,21 +406,32 @@ _cluster_healthy() {
 # .watch/secrets-sent, never the value), or that Fly doesn't have. A secret
 # the schema lists but that is empty here is left alone. Staged secrets are
 # applied by the deploy that follows, with the new image, so the machines
-# don't restart on the old one first. Uses DRY_RUN and FLY_APP.
+# don't restart on the old one first. A secret named in FLY_SET_ONCE_SECRETS
+# is never staged once Fly has it, whatever the value here. Uses DRY_RUN and
+# FLY_APP.
 _stage_secrets() {
     local sent_file="$PROJECT_ROOT/.watch/secrets-sent"
     mkdir -p "$(dirname "$sent_file")"
     touch "$sent_file"
 
-    local current_json
-    current_json=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null || echo "[]")
+    local current_json listed=1
+    current_json=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null) || { current_json="[]"; listed=0; }
 
     local secrets_args=() changed=() sums=() var_name var_desc value sum on_fly sent
     while IFS='|' read -r var_name var_desc; do
         value="$(varlock printenv "$var_name" --path "$PROJECT_ROOT/" 2>/dev/null)"
         [[ -n "$value" ]] || continue
-        sum=$(printf '%s' "$value" | shasum -a 256 | cut -c1-64)
         on_fly=$(echo "$current_json" | jq -r --arg name "$var_name" 'any(.[]; .name == $name)' 2>/dev/null)
+        if [[ " ${FLY_SET_ONCE_SECRETS:-} " == *" $var_name "* ]]; then
+            if [[ $listed -eq 0 ]]; then
+                echo "  ⚠ $var_name not staged: Fly's secrets couldn't be listed, and it is set once (FLY_SET_ONCE_SECRETS)"
+                continue
+            elif [[ "$on_fly" == "true" ]]; then
+                echo "  ✓ $var_name kept as it is on Fly (FLY_SET_ONCE_SECRETS)"
+                continue
+            fi
+        fi
+        sum=$(printf '%s' "$value" | shasum -a 256 | cut -c1-64)
         sent=$(awk -v name="$var_name" '$1 == name { print $2 }' "$sent_file")
         if [[ "$on_fly" != "true" || "$sum" != "$sent" ]]; then
             secrets_args+=("${var_name}=${value}")
