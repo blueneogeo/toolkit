@@ -55,8 +55,10 @@ Go module path from `go.mod`, `cmd/server` entry point. Overridable via
 `.env.local` and is new, changed or missing on Fly. `FLY_SET_ONCE_SECRETS` names
 secrets it never stages once Fly has them, such as a key that must never change
 (space-separated, e.g. `FLY_SET_ONCE_SECRETS="PHONE_NUMBER_KEY"`). The cluster
-health step counts only started machines: a machine Fly stopped for being idle
-doesn't make the deploy restart every machine at once.
+health check counts only started machines, and runs before anything changes.
+When a started machine is failing, the deploy lists it and stops; run it again
+with `--strategy rolling` or `--strategy immediate`. It never picks one on its
+own. A dry run says it would stop and goes on with rolling.
 
 ### Build pipeline
 

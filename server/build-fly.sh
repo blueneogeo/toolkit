@@ -364,13 +364,14 @@ _fly_auth_check() {
 
 # Judges the cluster on its started machines. A stopped machine (Fly's
 # auto_stop_machines) keeps a stale check and isn't counted against health;
-# with no machine started there is nothing to judge, and the deploy stays
-# rolling. Returns 0 healthy, 1 a started machine failing, 2 unknown.
+# with no machine started there is nothing to judge. Lists each started
+# machine that isn't passing. Returns 0 healthy, 1 a started machine
+# failing, 2 unknown.
 _cluster_healthy() {
     local states
-    states=$(fly machines list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[] | "\(.state // "unknown")|\([.checks[]?.status] | if length == 0 then "unknown" elif any(. == "critical") then "critical" elif any(. == "warning") then "warning" elif all(. == "passing") then "passing" else "unknown" end)"' 2>/dev/null)
-    local critical=0 warning=0 passing=0 started=0 stopped=0 other=0 state status
-    while IFS='|' read -r state status; do
+    states=$(fly machines list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[] | "\(.id // "?")|\(.state // "unknown")|\([.checks[]?.status] | if length == 0 then "unknown" elif any(. == "critical") then "critical" elif any(. == "warning") then "warning" elif all(. == "passing") then "passing" else "unknown" end)"' 2>/dev/null)
+    local critical=0 warning=0 passing=0 started=0 stopped=0 other=0 id state status failing=()
+    while IFS='|' read -r id state status; do
         [[ -z "$state" ]] && continue
         case "$state" in
             started) started=$((started + 1)) ;;
@@ -382,17 +383,21 @@ _cluster_healthy() {
             warning) warning=$((warning + 1)) ;;
             critical) critical=$((critical + 1)) ;;
         esac
+        [[ "$status" == "passing" ]] || failing+=("$id: $status")
     done <<< "$states"
     local idle="$stopped stopped"
     [[ $other -gt 0 ]] && idle+=", $other in another state"
     if [[ $((started + stopped + other)) -eq 0 ]]; then
-        echo "  no machines listed: nothing to judge, the deploy stays rolling"
+        echo "  no machines listed: nothing to judge"
         return 0
     elif [[ $started -eq 0 ]]; then
-        echo "  no machine started ($idle, not counted): nothing to judge, the deploy stays rolling"
+        echo "  no machine started ($idle, not counted): nothing to judge"
         return 0
     fi
     echo "  $started started: $passing passing, $warning warning, $critical critical; $idle, not counted"
+    if [[ ${#failing[@]} -gt 0 ]]; then
+        printf '    %s\n' "${failing[@]}"
+    fi
     if [[ $passing -eq $started ]]; then
         return 0
     elif [[ $warning -gt 0 || $critical -gt 0 ]]; then
@@ -415,7 +420,11 @@ _stage_secrets() {
     touch "$sent_file"
 
     local current_json listed=1
-    current_json=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null) || { current_json="[]"; listed=0; }
+    current_json=$(fly secrets list --app "$FLY_APP" --json 2>/dev/null) || listed=0
+    if [[ $listed -eq 0 ]] || ! jq -e 'type == "array"' <<< "$current_json" >/dev/null 2>&1; then
+        current_json="[]"
+        listed=0
+    fi
 
     local secrets_args=() changed=() sums=() var_name var_desc value sum on_fly sent
     while IFS='|' read -r var_name var_desc; do
@@ -462,7 +471,7 @@ _stage_secrets() {
 _fly_deploy() {
     local deploy_text=""
     local DRY_RUN=0
-    local DEPLOY_STRATEGY="rolling"
+    local DEPLOY_STRATEGY="rolling" strategy_given=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --dry-run) DRY_RUN=1; shift ;;
@@ -470,12 +479,13 @@ _fly_deploy() {
                 shift
                 if [[ -n "${1:-}" && "$1" != --* ]]; then
                     DEPLOY_STRATEGY="$1"
+                    strategy_given=1
                     shift
                 else
                     DEPLOY_STRATEGY="rolling"
                 fi
                 ;;
-            --strategy=*) DEPLOY_STRATEGY="${1#*=}"; shift ;;
+            --strategy=*) DEPLOY_STRATEGY="${1#*=}"; strategy_given=1; shift ;;
             --force) shift ;;
             *)
                 if [[ -z "$deploy_text" ]]; then
@@ -486,6 +496,10 @@ _fly_deploy() {
         esac
     done
 
+    if [[ "$DEPLOY_STRATEGY" != "rolling" && "$DEPLOY_STRATEGY" != "immediate" ]]; then
+        echo "✗ --strategy is rolling or immediate, not $DEPLOY_STRATEGY"
+        return 1
+    fi
     if [[ -z "$deploy_text" ]]; then
         echo "✗ Deploy text is required."
         echo "  Usage: ./build.sh server deploy [--dry-run] [--strategy rolling|immediate] [--force] \"deploy text\" (flags may come before or after text)"
@@ -540,6 +554,29 @@ _fly_deploy() {
             current_label="$current_tag"
         else
             current_label="(none)"
+        fi
+    fi
+
+    # The cluster's health is judged before anything changes. When a started
+    # machine is failing, the deploy never picks a strategy on its own.
+    echo ""
+    echo "Cluster health"
+    local cluster_note="healthy"
+    if ! _cluster_healthy; then
+        if [[ $strategy_given -eq 1 ]]; then
+            cluster_note="not fully healthy; --strategy $DEPLOY_STRATEGY as asked"
+            echo "  ⚠ not fully healthy: deploying with --strategy $DEPLOY_STRATEGY, as asked"
+        else
+            echo "  ✗ The cluster isn't fully healthy, and the deploy doesn't pick a strategy for that on its own."
+            echo "    --strategy rolling replaces one machine at a time and stops when a new machine fails its check."
+            echo "    --strategy immediate replaces every machine at once."
+            echo "    Run the deploy again with one of them."
+            if [[ $DRY_RUN -eq 1 ]]; then
+                echo "  (dry run) A real deploy stops here. The dry run goes on with rolling."
+                cluster_note="not fully healthy; a real deploy stops before anything changes"
+            else
+                return 1
+            fi
         fi
     fi
 
@@ -624,13 +661,8 @@ _fly_deploy() {
     step_start=$SECONDS
     echo ""
     echo "[5/8] Cluster health"
-    local cluster_ok=0
-    _cluster_healthy && cluster_ok=1 || true
+    echo "  checked before the confirmation: $cluster_note"
     echo "  ⏱  $((SECONDS - step_start))s"
-    if [[ $cluster_ok -ne 1 && "$DEPLOY_STRATEGY" == "rolling" ]]; then
-        echo "  ⚠ cluster not fully healthy — switching to immediate strategy"
-        DEPLOY_STRATEGY="immediate"
-    fi
 
     # ── Step 6: Deploy to Fly ────────────────────────────────────
     step_start=$SECONDS
