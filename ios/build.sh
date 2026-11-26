@@ -815,6 +815,9 @@ do_launch() {
         echo "→ No built app found, building first"
         _do_build build || return 1
     fi
+    # Restart a running app, as the help says: otherwise the simulator only
+    # brings it to the front and the arguments never reach it.
+    _LAUNCH_FRESH=true
     if [[ ${#_launch_args[@]} -gt 0 ]]; then
         _launch_app "${_launch_args[@]}"
     else
